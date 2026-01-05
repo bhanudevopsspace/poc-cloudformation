@@ -1,0 +1,48 @@
+Parameters:
+  Env:
+    Type: String
+  VpcCidr:
+    Type: String
+  PublicSubnetCidr:
+    Type: String
+  PrivateSubnetCidr:
+    Type: String
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+  VPC:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/vpc.yaml
+      Parameters:
+        Env: !Ref Env
+        VpcCidr: !Ref VpcCidr
+        PublicSubnetCidr: !Ref PublicSubnetCidr
+        PrivateSubnetCidr: !Ref PrivateSubnetCidr
+
+  S3:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/s3.yaml
+      Parameters:
+        Env: !Ref Env
+
+  SQS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/sqs.yaml
+
+  Lambda:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/lambda.yaml
+
+  EC2:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/ec2.yaml
+      Parameters:
+        SubnetId: !GetAtt VPC.Outputs.PublicSubnetId
+        SecurityGroupId: !GetAtt VPC.Outputs.SecurityGroupId
+        KeyName: !Ref KeyName

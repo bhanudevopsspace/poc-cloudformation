@@ -1,0 +1,79 @@
+name: Deploy CloudFormation
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy (dev or staging)"
+        required: true
+        default: dev
+
+env:
+  APP_NAME: app1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-1 # default, overridden below
+
+      # 3️⃣ Set environment-specific variables
+      - name: Set environment variables
+        id: env
+        run: |
+          if [ "${{ github.event.inputs.environment }}" = "staging" ]; then
+            echo "ENV=staging" >> $GITHUB_ENV
+            echo "AWS_REGION=us-west-2" >> $GITHUB_ENV
+            echo "ARTIFACT_BUCKET=cfn-artifacts-us-west-2" >> $GITHUB_ENV
+          else
+            echo "ENV=dev" >> $GITHUB_ENV
+            echo "AWS_REGION=us-west-1" >> $GITHUB_ENV
+            echo "ARTIFACT_BUCKET=cfn-artifacts-us-west-1" >> $GITHUB_ENV
+          fi
+
+      # 4️⃣ Update AWS region for this job
+      - name: Update AWS region
+        run: |
+          echo "AWS_DEFAULT_REGION=${AWS_REGION}" >> $GITHUB_ENV
+
+      # 5️⃣ Ensure artifacts bucket exists
+      - name: Ensure S3 artifacts bucket exists
+        run: |
+          aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null || \
+          aws s3api create-bucket \
+            --bucket "$ARTIFACT_BUCKET" \
+            --region "$AWS_REGION" \
+            --create-bucket-configuration LocationConstraint="$AWS_REGION"
+
+      # 6️⃣ Package CloudFormation templates
+      - name: Package CloudFormation
+        run: |
+          aws cloudformation package \
+            --region "$AWS_REGION" \
+            --template-file cloudformation/stacks/app.yaml \
+            --s3-bucket "$ARTIFACT_BUCKET" \
+            --output-template-file packaged.yaml
+
+      # 7️⃣ Deploy CloudFormation stack
+      - name: Deploy CloudFormation
+        run: |
+          aws cloudformation deploy \
+            --region "$AWS_REGION" \
+            --template-file packaged.yaml \
+            --stack-name "${APP_NAME}-${ENV}" \
+            --parameter-overrides $(jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' config/environments/application1/${ENV}/app.json) \
+            --capabilities CAPABILITY_NAMED_IAM

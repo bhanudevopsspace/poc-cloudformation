@@ -1,0 +1,64 @@
+ext {
+    app        = project.findProperty("app") ?: "application1"
+    env        = project.findProperty("env") ?: "dev"
+
+    regionMap = [
+        dev     : "us-west-1",
+        staging : "us-west-2"
+    ]
+
+    stackMap = [
+        application1 : "app.yaml",
+        application2 : "app-no-lambda.yaml"
+    ]
+
+    region        = regionMap[env]
+    stackTemplate = stackMap[app]
+
+    stackName     = "${app}-${env}"
+    artifactBucket = "cfn-artifacts-${region}"
+    paramsFile    = "config/environments/${app}/${env}/app.json"
+}
+
+task validateConfig {
+    doLast {
+        assert file(paramsFile).exists() : "Missing params file: ${paramsFile}"
+        assert stackTemplate != null : "No stack template mapped for app=${app}"
+    }
+}
+
+task packageStack(type: Exec) {
+    dependsOn validateConfig
+    commandLine "aws", "cloudformation", "package",
+        "--region", region,
+        "--template-file", "cloudformation/stacks/${stackTemplate}",
+        "--s3-bucket", artifactBucket,
+        "--output-template-file", "packaged.yaml"
+}
+
+task deployStack(type: Exec) {
+    dependsOn packageStack
+
+    def paramCmd = "jq -r \"to_entries|map(\\\"\\\\(.key)=\\\\(.value)\\\")|.[]\" ${paramsFile}"
+
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+        commandLine "cmd", "/c", """
+            for /f "delims=" %i in ('${paramCmd}') do set PARAMS=%PARAMS% %i
+            aws cloudformation deploy ^
+              --region ${region} ^
+              --template-file packaged.yaml ^
+              --stack-name ${stackName} ^
+              --parameter-overrides %PARAMS% ^
+              --capabilities CAPABILITY_NAMED_IAM
+        """
+    } else {
+        commandLine "sh", "-c", """
+            aws cloudformation deploy \
+              --region ${region} \
+              --template-file packaged.yaml \
+              --stack-name ${stackName} \
+              --parameter-overrides \$(jq -r 'to_entries|map("\\(.key)=\\(.value)")|.[]' ${paramsFile}) \
+              --capabilities CAPABILITY_NAMED_IAM
+        """
+    }
+}

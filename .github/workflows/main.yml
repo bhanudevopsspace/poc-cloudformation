@@ -1,18 +1,19 @@
 name: Deploy CloudFormation
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to deploy (dev or staging)"
+        description: "Deployment environment"
         required: true
-        default: dev
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
 
 env:
-  APP_NAME: app1
+  APP_NAME: cumulus-app1
 
 jobs:
   deploy:

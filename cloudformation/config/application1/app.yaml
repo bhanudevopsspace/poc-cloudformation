@@ -8,7 +8,9 @@ Parameters:
   PrivateSubnetCidr:
     Type: String
   KeyName:
-    Type: AWS::EC2::KeyPair::KeyName
+    Type: String
+    Default: ""
+    Description: EC2 KeyPair name (optional, only needed if deploying EC2)
 
   DeployFoundationStack:
     Type: String
@@ -16,7 +18,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Description: "Deploy VPC and networking resources (set by change detection)"
+    Description: "Deploy IAM roles and policies"
 
   DeployDataStack:
     Type: String
@@ -24,7 +26,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Description: "Deploy S3 and data resources (set by change detection)"
+    Description: "Deploy S3 and data resources"
 
   DeployComputeStack:
     Type: String
@@ -32,7 +34,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Description: "Deploy EC2 and Lambda compute resources (set by change detection)"
+    Description: "Deploy EC2 and Lambda compute resources"
 
   DeployServicesStack:
     Type: String
@@ -40,7 +42,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Description: "Deploy SQS and messaging resources (set by change detection)"
+    Description: "Deploy SQS and messaging resources"
 
   DeployObservabilityStack:
     Type: String
@@ -48,7 +50,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Description: "Deploy CloudWatch and monitoring resources (set by change detection)"
+    Description: "Deploy CloudWatch and monitoring resources"
 
   DeployApplicationStack:
     Type: String
@@ -56,7 +58,7 @@ Parameters:
     AllowedValues:
       - "true"
       - "false"
-    Description: "Deploy application-level configuration (set by change detection)"
+    Description: "Deploy application-level configuration"
 
 Conditions:
   CreateFoundationStack: !Equals [!Ref DeployFoundationStack, "true"]
@@ -67,61 +69,85 @@ Conditions:
   CreateApplicationStack: !Equals [!Ref DeployApplicationStack, "true"]
 
 Resources:
+  # Use generic IAM policy module - creates all policies
   IAMPolicy:
     Type: AWS::CloudFormation::Stack
     Condition: CreateFoundationStack
     Properties:
-      TemplateURL: ../modules/iam-policy-readonly.yaml
-      Parameters:
-        PolicyName: !Sub 'ReadOnlyPolicy-${Env}'
+      TemplateURL: ../../modules/iam-policy.yaml
 
+  # Application1 only needs Application1PolicyArn
   IAMRole:
     Type: AWS::CloudFormation::Stack
     Condition: CreateFoundationStack
     DependsOn: IAMPolicy
     Properties:
-      TemplateURL: ../modules/iam-role.yaml
+      TemplateURL: ../../modules/iam-role.yaml
       Parameters:
-        RoleName: !Sub 'ReadOnlyRole-${Env}'
-        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.PolicyArn
+        RoleName: !Sub 'ReadOnlyRole-app1-${Env}'
+        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.Application1PolicyArn
+        GuardrailPolicyArn: !GetAtt IAMPolicy.Outputs.GuardrailPolicyArn
 
   VPC:
     Type: AWS::CloudFormation::Stack
     Condition: CreateFoundationStack
     Properties:
-      TemplateURL: ../modules/vpc.yaml
+      TemplateURL: ../../modules/vpc.yaml
       Parameters:
-        Env: !Ref Env
+        Environment: !Ref Env
         VpcCidr: !Ref VpcCidr
         PublicSubnetCidr: !Ref PublicSubnetCidr
         PrivateSubnetCidr: !Ref PrivateSubnetCidr
 
-  S3:
+  S3Bucket:
     Type: AWS::CloudFormation::Stack
     Condition: CreateDataStack
     Properties:
-      TemplateURL: ../modules/s3.yaml
+      TemplateURL: ../../modules/s3.yaml
       Parameters:
-        Env: !Ref Env
+        Environment: !Ref Env
 
-  SQS:
+  SQSQueue:
     Type: AWS::CloudFormation::Stack
     Condition: CreateServicesStack
     Properties:
-      TemplateURL: ../modules/sqs.yaml
-
-  Lambda:
-    Type: AWS::CloudFormation::Stack
-    Condition: CreateComputeStack
-    Properties:
-      TemplateURL: ../modules/lambda.yaml
-
-  EC2:
-    Type: AWS::CloudFormation::Stack
-    Condition: CreateComputeStack
-    Properties:
-      TemplateURL: ../modules/ec2.yaml
+      TemplateURL: ../../modules/sqs.yaml
       Parameters:
-        SubnetId: !GetAtt VPC.Outputs.PublicSubnetId
-        SecurityGroupId: !GetAtt VPC.Outputs.SecurityGroupId
+        Environment: !Ref Env
+
+  LambdaFunction:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
+    DependsOn:
+      - S3Bucket
+      - SQSQueue
+    Properties:
+      TemplateURL: ../../modules/lambda.yaml
+      Parameters:
+        Environment: !Ref Env
+        S3BucketName: !GetAtt S3Bucket.Outputs.BucketName
+        SQSQueueUrl: !GetAtt SQSQueue.Outputs.QueueUrl
+
+  EC2Instance:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
+    DependsOn: VPC
+    Properties:
+      TemplateURL: ../../modules/ec2.yaml
+      Parameters:
+        Environment: !Ref Env
         KeyName: !Ref KeyName
+        SubnetId: !GetAtt VPC.Outputs.PublicSubnetId
+
+Outputs:
+  RoleArn:
+    Condition: CreateFoundationStack
+    Value: !GetAtt IAMRole.Outputs.RoleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+  
+  InstanceProfileArn:
+    Condition: CreateFoundationStack
+    Value: !GetAtt IAMRole.Outputs.InstanceProfileArn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'

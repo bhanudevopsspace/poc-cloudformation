@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'IAM Role Module - Assumes read-only access'
+Description: 'IAM Role Module - Generic role that accepts policy ARNs'
 
 Parameters:
   RoleName:
@@ -16,6 +16,10 @@ Parameters:
     Type: String
     Description: ARN of the read-only managed policy to attach
   
+  GuardrailPolicyArn:
+    Type: String
+    Description: ARN of the guardrail deny policy to attach
+  
   MaxSessionDuration:
     Type: Number
     Default: 3600
@@ -28,7 +32,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Ref RoleName
-      Description: Role with read-only access to AWS resources
+      Description: Read-only role with guardrail protections
       MaxSessionDuration: !Ref MaxSessionDuration
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -39,6 +43,7 @@ Resources:
             Action: 'sts:AssumeRole'
       ManagedPolicyArns:
         - !Ref ReadOnlyPolicyArn
+        - !Ref GuardrailPolicyArn
 
   # Instance profile for EC2 instances
   ReadOnlyInstanceProfile:

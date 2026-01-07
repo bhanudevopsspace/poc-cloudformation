@@ -136,10 +136,10 @@ resourceMappings:
       - "update_config"
     description: "Application configuration files"
 
-  # Foundation Stack (IAM Policy)
-  iam_policy_readonly:
+  # Foundation Stack (IAM Policy - All in one file)
+  iam_policy:
     patterns:
-      - "cloudformation/modules/iam-policy-readonly.yaml"
+      - "cloudformation/modules/iam-policy.yaml"
     resource_type: "AWS::IAM::ManagedPolicy"
     impact_level: "HIGH"
     target_stack: "foundation"
@@ -147,7 +147,7 @@ resourceMappings:
       - "IAMPolicy"
     required_actions:
       - "update"
-    description: "IAM read-only managed policy configuration"
+    description: "IAM policies for all applications - conditionally attaches based on ApplicationType"
 
   # Foundation Stack (IAM Role)
   iam_role:

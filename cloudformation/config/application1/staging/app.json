@@ -1,0 +1,14 @@
+{
+  "ApplicationType": "application1",
+  "Env": "staging",
+  "VpcCidr": "10.1.0.0/16",
+  "PublicSubnetCidr": "10.1.1.0/24",
+  "PrivateSubnetCidr": "10.1.2.0/24",
+  "KeyName": "cft-staging",
+  "DeployFoundationStack": "true",
+  "DeployDataStack": "true",
+  "DeployComputeStack": "true",
+  "DeployServicesStack": "true",
+  "DeployObservabilityStack": "false",
+  "DeployApplicationStack": "false"
+}

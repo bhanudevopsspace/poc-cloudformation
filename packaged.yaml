@@ -1,0 +1,123 @@
+Parameters:
+  Env:
+    Type: String
+  ApplicationType:
+    Type: String
+    Default: application1
+    AllowedValues:
+    - application1
+    - application2
+    Description: Application type (application1 or application2)
+  VpcCidr:
+    Type: String
+  PublicSubnetCidr:
+    Type: String
+  PrivateSubnetCidr:
+    Type: String
+  KeyName:
+    Type: String
+    Default: ''
+    Description: EC2 KeyPair name (optional, only needed if deploying EC2)
+  DeployFoundationStack:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: Deploy VPC and networking resources (set by change detection)
+  DeployDataStack:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: Deploy S3 and data resources (set by change detection)
+  DeployComputeStack:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: Deploy EC2 and Lambda compute resources (set by change detection)
+  DeployServicesStack:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: Deploy SQS and messaging resources (set by change detection)
+  DeployObservabilityStack:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: Deploy CloudWatch and monitoring resources (set by change detection)
+  DeployApplicationStack:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'true'
+    - 'false'
+    Description: Deploy application-level configuration (set by change detection)
+Conditions:
+  CreateFoundationStack:
+    Fn::Equals:
+    - Ref: DeployFoundationStack
+    - 'true'
+  CreateDataStack:
+    Fn::Equals:
+    - Ref: DeployDataStack
+    - 'true'
+  CreateComputeStack:
+    Fn::Equals:
+    - Ref: DeployComputeStack
+    - 'true'
+  CreateServicesStack:
+    Fn::Equals:
+    - Ref: DeployServicesStack
+    - 'true'
+  CreateObservabilityStack:
+    Fn::Equals:
+    - Ref: DeployObservabilityStack
+    - 'true'
+  CreateApplicationStack:
+    Fn::Equals:
+    - Ref: DeployApplicationStack
+    - 'true'
+  IsApplication1:
+    Fn::Equals:
+    - Ref: ApplicationType
+    - application1
+  IsApplication2:
+    Fn::Equals:
+    - Ref: ApplicationType
+    - application2
+Resources:
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/25f145d9ae6e9fa97b45e8134bae647f.template
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/0fc50d3a09795830dc898c166adccee9.template
+      Parameters:
+        RoleName:
+          Fn::Sub: ReadOnlyRole-${ApplicationType}-${Env}
+        ReadOnlyPolicyArn:
+          Fn::If:
+          - IsApplication1
+          - Fn::GetAtt:
+            - IAMPolicy
+            - Outputs.Application1PolicyArn
+          - Fn::GetAtt:
+            - IAMPolicy
+            - Outputs.Application2PolicyArn
+        GuardrailPolicyArn:
+          Fn::GetAtt:
+          - IAMPolicy
+          - Outputs.GuardrailPolicyArn

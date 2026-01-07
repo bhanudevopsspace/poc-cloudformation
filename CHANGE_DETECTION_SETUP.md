@@ -25,20 +25,34 @@ Only affected child stacks deployed ✓
 ## Files Created
 
 ### Configuration
-- **`config/change-detection-config.yaml`**: Defines patterns, resource mappings, impact levels, and condition mappings
+- **`scripts/pre-ci/change-detection-config.yaml`**: Defines patterns, resource mappings, impact levels, and condition mappings
 
 ### Scripts
 - **`scripts/pre-ci/change-detection.py`**: Main detection script - analyzes git diffs against patterns
 - **`scripts/pre-ci/prepare-change-meta.py`**: Decorates metadata with CloudFormation condition flags
 - **`scripts/pre-ci/validate-change-impact.py`**: Validates metadata completeness and consistency
 
-### CloudFormation Modules
-- **`cloudformation/modules/iam-policy-readonly.yaml`**: Read-only IAM managed policy (EC2, S3, Lambda, SQS, VPC, CloudFormation, CloudWatch)
-- **`cloudformation/modules/iam-role.yaml`**: IAM role that assumes the read-only policy and creates instance profile
-
-### CloudFormation Templates
-- **`cloudformation/stacks/app.yaml`**: Master template with conditional nested stacks (VPC, S3, SQS, Lambda, EC2, IAM Policy, IAM Role)
-- **`packaged-dev.yaml`**: Packaged template with S3 artifact URLs (for CI/CD pipelines)
+### CloudFormation Structure
+```
+cloudformation/
+  config/
+    application1/
+      app.yaml              # Application1 template (uses Application1PolicyArn)
+      dev/app.json          # Dev environment parameters
+      staging/app.json      # Staging environment parameters
+    application2/
+      app.yaml              # Application2 template (uses Application2PolicyArn)
+      dev/app.json
+      staging/app.json
+  modules/
+    iam-policy.yaml         # Generic IAM policies (creates all policies)
+    iam-role.yaml           # Generic IAM role module
+    vpc.yaml
+    s3.yaml
+    sqs.yaml
+    lambda.yaml
+    ec2.yaml
+```
 
 ### CI/CD
 - **`.github/workflows/ci-cd-change-detection.yml`**: GitHub Actions workflow demonstrating the full pipeline
@@ -71,7 +85,7 @@ Detects changes between two commits and generates metadata:
 
 ```bash
 python scripts/pre-ci/change-detection.py \
-  --config config/change-detection-config.yaml \
+  --config scripts/pre-ci/change-detection-config.yaml \
   --base main \
   --head HEAD \
   --output change-metadata.json
@@ -147,29 +161,45 @@ Checks:
 
 ### 4. Deploy with CloudFormation
 
-Pass condition flags to CloudFormation:
+#### Application 1 Deployment
 
 ```bash
+# Package template
+aws cloudformation package \
+  --region us-west-1 \
+  --template-file cloudformation/config/application1/app.yaml \
+  --s3-bucket cfn-artifacts-us-west-1 \
+  --output-template-file packaged.yaml
+
+# Deploy with parameters from config
 aws cloudformation deploy \
   --region us-west-1 \
-  --template-file cloudformation/stacks/app.yaml \
-  --stack-name app1-prod \
-  --parameter-overrides \
-    Env=prod \
-    VpcCidr=10.0.0.0/16 \
-    PublicSubnetCidr=10.0.1.0/24 \
-    PrivateSubnetCidr=10.0.2.0/24 \
-    KeyName=cft-prod \
-    DeployFoundationStack=false \
-    DeployDataStack=false \
-    DeployComputeStack=true \
-    DeployServicesStack=false \
-    DeployObservabilityStack=false \
-    DeployApplicationStack=false \
+  --template-file packaged.yaml \
+  --stack-name app1-dev \
+  --parameter-overrides $(jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' cloudformation/config/application1/dev/app.json) \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
-**Result**: Only the Lambda and EC2 nested stacks deploy (compute stack). VPC, S3, SQS remain unchanged.
+#### Application 2 Deployment
+
+```bash
+# Package template
+aws cloudformation package \
+  --region us-west-1 \
+  --template-file cloudformation/config/application2/app.yaml \
+  --s3-bucket cfn-artifacts-us-west-1 \
+  --output-template-file packaged.yaml
+
+# Deploy with parameters from config
+aws cloudformation deploy \
+  --region us-west-1 \
+  --template-file packaged.yaml \
+  --stack-name app2-dev \
+  --parameter-overrides $(jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' cloudformation/config/application2/dev/app.json) \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+
+**Result**: Only the specified stacks deploy based on Deploy*Stack parameters in app.json.
 
 ## CloudFormation Template Changes
 

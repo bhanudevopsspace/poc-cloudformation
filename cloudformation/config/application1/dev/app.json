@@ -1,0 +1,12 @@
+{
+  "Env": "dev",
+  "VpcCidr": "10.0.0.0/16",
+  "PublicSubnetCidr": "10.0.1.0/24",
+  "PrivateSubnetCidr": "10.0.2.0/24",
+  "DeployFoundationStack": "true",
+  "DeployDataStack": "false",
+  "DeployComputeStack": "false",
+  "DeployServicesStack": "false",
+  "DeployObservabilityStack": "false",
+  "DeployApplicationStack": "false"
+}

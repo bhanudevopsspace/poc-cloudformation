@@ -1,0 +1,153 @@
+Parameters:
+  Env:
+    Type: String
+  VpcCidr:
+    Type: String
+  PublicSubnetCidr:
+    Type: String
+  PrivateSubnetCidr:
+    Type: String
+  KeyName:
+    Type: String
+    Default: ""
+    Description: EC2 KeyPair name (optional, only needed if deploying EC2)
+
+  DeployFoundationStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy IAM roles and policies"
+
+  DeployDataStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy S3 and data resources"
+
+  DeployComputeStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy EC2 and Lambda compute resources"
+
+  DeployServicesStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy SQS and messaging resources"
+
+  DeployObservabilityStack:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy CloudWatch and monitoring resources"
+
+  DeployApplicationStack:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy application-level configuration"
+
+Conditions:
+  CreateFoundationStack: !Equals [!Ref DeployFoundationStack, "true"]
+  CreateDataStack: !Equals [!Ref DeployDataStack, "true"]
+  CreateComputeStack: !Equals [!Ref DeployComputeStack, "true"]
+  CreateServicesStack: !Equals [!Ref DeployServicesStack, "true"]
+  CreateObservabilityStack: !Equals [!Ref DeployObservabilityStack, "true"]
+  CreateApplicationStack: !Equals [!Ref DeployApplicationStack, "true"]
+
+Resources:
+  # Use generic IAM policy module - creates all policies
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    Properties:
+      TemplateURL: ../../modules/iam-policy.yaml
+
+  # Application2 needs Application2PolicyArn (different from app1)
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: ../../modules/iam-role.yaml
+      Parameters:
+        RoleName: !Sub 'ReadOnlyRole-app2-${Env}'
+        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.Application2PolicyArn
+        GuardrailPolicyArn: !GetAtt IAMPolicy.Outputs.GuardrailPolicyArn
+
+  VPC:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    Properties:
+      TemplateURL: ../../modules/vpc.yaml
+      Parameters:
+        Environment: !Ref Env
+        VpcCidr: !Ref VpcCidr
+        PublicSubnetCidr: !Ref PublicSubnetCidr
+        PrivateSubnetCidr: !Ref PrivateSubnetCidr
+
+  S3Bucket:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateDataStack
+    Properties:
+      TemplateURL: ../../modules/s3.yaml
+      Parameters:
+        Environment: !Ref Env
+
+  SQSQueue:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateServicesStack
+    Properties:
+      TemplateURL: ../../modules/sqs.yaml
+      Parameters:
+        Environment: !Ref Env
+
+  LambdaFunction:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
+    DependsOn:
+      - S3Bucket
+      - SQSQueue
+    Properties:
+      TemplateURL: ../../modules/lambda.yaml
+      Parameters:
+        Environment: !Ref Env
+        S3BucketName: !GetAtt S3Bucket.Outputs.BucketName
+        SQSQueueUrl: !GetAtt SQSQueue.Outputs.QueueUrl
+
+  EC2Instance:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
+    DependsOn: VPC
+    Properties:
+      TemplateURL: ../../modules/ec2.yaml
+      Parameters:
+        Environment: !Ref Env
+        KeyName: !Ref KeyName
+        SubnetId: !GetAtt VPC.Outputs.PublicSubnetId
+
+Outputs:
+  RoleArn:
+    Condition: CreateFoundationStack
+    Value: !GetAtt IAMRole.Outputs.RoleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+  
+  InstanceProfileArn:
+    Condition: CreateFoundationStack
+    Value: !GetAtt IAMRole.Outputs.InstanceProfileArn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'

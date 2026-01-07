@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM Read-Only Managed Policy Module'
+
+Parameters:
+  PolicyName:
+    Type: String
+    Default: ReadOnlyPolicy
+    Description: Name of the read-only managed policy
+  
+  IncludeS3ReadOnly:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Include S3 read-only permissions
+
+Conditions:
+  AddS3ReadOnly: !Equals [!Ref IncludeS3ReadOnly, "true"]
+
+Resources:
+  ReadOnlyManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref PolicyName
+      Description: Read-only policy for AWS resources
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadOnlyEC2
+            Effect: Allow
+            Action:
+              - 'ec2:Describe*'
+              - 'ec2:Get*'
+              - 'ec2:List*'
+            Resource: '*'
+          
+          - Sid: ReadOnlyS3
+            Effect: Allow
+            Action:
+              - 's3:Get*'
+              - 's3:List*'
+              - 's3:Describe*'
+            Resource: '*'
+          
+          - Sid: ReadOnlyLambda
+            Effect: Allow
+            Action:
+              - 'lambda:GetFunction'
+              - 'lambda:GetFunctionConfiguration'
+              - 'lambda:ListFunctions'
+              - 'lambda:ListVersionsByFunction'
+            Resource: '*'
+          
+          - Sid: ReadOnlySQS
+            Effect: Allow
+            Action:
+              - 'sqs:GetQueueAttributes'
+              - 'sqs:ListQueues'
+              - 'sqs:ReceiveMessage'
+            Resource: '*'
+          
+          - Sid: ReadOnlyVPC
+            Effect: Allow
+            Action:
+              - 'ec2:DescribeVpcs'
+              - 'ec2:DescribeSubnets'
+              - 'ec2:DescribeNetworkInterfaces'
+              - 'ec2:DescribeSecurityGroups'
+            Resource: '*'
+          
+          - Sid: CloudFormationReadOnly
+            Effect: Allow
+            Action:
+              - 'cloudformation:DescribeStacks'
+              - 'cloudformation:DescribeStackEvents'
+              - 'cloudformation:DescribeStackResource'
+              - 'cloudformation:DescribeStackResources'
+              - 'cloudformation:ListStacks'
+              - 'cloudformation:GetTemplate'
+            Resource: '*'
+          
+          - Sid: CloudWatchReadOnly
+            Effect: Allow
+            Action:
+              - 'logs:Describe*'
+              - 'logs:Get*'
+              - 'logs:List*'
+              - 'cloudwatch:DescribeAlarms'
+              - 'cloudwatch:GetMetricStatistics'
+              - 'cloudwatch:ListMetrics'
+            Resource: '*'
+
+Outputs:
+  PolicyArn:
+    Description: ARN of the read-only managed policy
+    Value: !GetAtt ReadOnlyManagedPolicy.PolicyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-PolicyArn'
+  
+  PolicyName:
+    Description: Name of the read-only managed policy
+    Value: !Ref ReadOnlyManagedPolicy
+    Export:
+      Name: !Sub '${AWS::StackName}-PolicyName'

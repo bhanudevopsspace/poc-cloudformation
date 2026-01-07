@@ -10,9 +10,84 @@ Parameters:
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
 
+  DeployFoundationStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy VPC and networking resources (set by change detection)"
+
+  DeployDataStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy S3 and data resources (set by change detection)"
+
+  DeployComputeStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy EC2 and Lambda compute resources (set by change detection)"
+
+  DeployServicesStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy SQS and messaging resources (set by change detection)"
+
+  DeployObservabilityStack:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy CloudWatch and monitoring resources (set by change detection)"
+
+  DeployApplicationStack:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy application-level configuration (set by change detection)"
+
+Conditions:
+  CreateFoundationStack: !Equals [!Ref DeployFoundationStack, "true"]
+  CreateDataStack: !Equals [!Ref DeployDataStack, "true"]
+  CreateComputeStack: !Equals [!Ref DeployComputeStack, "true"]
+  CreateServicesStack: !Equals [!Ref DeployServicesStack, "true"]
+  CreateObservabilityStack: !Equals [!Ref DeployObservabilityStack, "true"]
+  CreateApplicationStack: !Equals [!Ref DeployApplicationStack, "true"]
+
 Resources:
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    Properties:
+      TemplateURL: ../modules/iam-policy-readonly.yaml
+      Parameters:
+        PolicyName: !Sub 'ReadOnlyPolicy-${Env}'
+
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: ../modules/iam-role.yaml
+      Parameters:
+        RoleName: !Sub 'ReadOnlyRole-${Env}'
+        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.PolicyArn
+
   VPC:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
     Properties:
       TemplateURL: ../modules/vpc.yaml
       Parameters:
@@ -23,6 +98,7 @@ Resources:
 
   S3:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateDataStack
     Properties:
       TemplateURL: ../modules/s3.yaml
       Parameters:
@@ -30,16 +106,19 @@ Resources:
 
   SQS:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateServicesStack
     Properties:
       TemplateURL: ../modules/sqs.yaml
 
   Lambda:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
     Properties:
       TemplateURL: ../modules/lambda.yaml
 
   EC2:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
     Properties:
       TemplateURL: ../modules/ec2.yaml
       Parameters:

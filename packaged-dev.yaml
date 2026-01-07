@@ -9,9 +9,66 @@ Parameters:
     Type: String
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
+
+  DeployFoundationStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy VPC and networking resources (set by change detection)"
+
+  DeployDataStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy S3 and data resources (set by change detection)"
+
+  DeployComputeStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy EC2 and Lambda compute resources (set by change detection)"
+
+  DeployServicesStack:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy SQS and messaging resources (set by change detection)"
+
+  DeployObservabilityStack:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy CloudWatch and monitoring resources (set by change detection)"
+
+  DeployApplicationStack:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy application-level configuration (set by change detection)"
+
+Conditions:
+  CreateFoundationStack: !Equals [!Ref DeployFoundationStack, "true"]
+  CreateDataStack: !Equals [!Ref DeployDataStack, "true"]
+  CreateComputeStack: !Equals [!Ref DeployComputeStack, "true"]
+  CreateServicesStack: !Equals [!Ref DeployServicesStack, "true"]
+  CreateObservabilityStack: !Equals [!Ref DeployObservabilityStack, "true"]
+  CreateApplicationStack: !Equals [!Ref DeployApplicationStack, "true"]
 Resources:
   VPC:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
     Properties:
       TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/91a5b6fee00406f0b1fabd79e2c387ed.template
       Parameters:
@@ -23,8 +80,33 @@ Resources:
           Ref: PublicSubnetCidr
         PrivateSubnetCidr:
           Ref: PrivateSubnetCidr
+
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/iam-policy-readonly.template
+      Parameters:
+        PolicyName:
+          Fn::Sub: ReadOnlyPolicy-${Env}
+
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateFoundationStack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/iam-role.template
+      Parameters:
+        RoleName:
+          Fn::Sub: ReadOnlyRole-${Env}
+        ReadOnlyPolicyArn:
+          Fn::GetAtt:
+          - IAMPolicy
+          - Outputs.PolicyArn
+
   S3:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateDataStack
     Properties:
       TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/88179c73ae1390d9644371df19405ee3.template
       Parameters:
@@ -32,14 +114,17 @@ Resources:
           Ref: Env
   SQS:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateServicesStack
     Properties:
       TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/140ac18a6e014848e436325d686c6483.template
   Lambda:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
     Properties:
       TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/73152214233209330db799e1410e51b8.template
   EC2:
     Type: AWS::CloudFormation::Stack
+    Condition: CreateComputeStack
     Properties:
       TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/ee4a281ba38b747191117e6be27a73e8.template
       Parameters:

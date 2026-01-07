@@ -1,0 +1,213 @@
+name: CI/CD with Change Detection
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  AWS_REGION: us-west-1
+  CONFIG_DIR: config/environments/application1
+
+jobs:
+  change-detection:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      metadata: ${{ steps.prepare-meta.outputs.metadata }}
+      has-changes: ${{ steps.validate.outputs.is-valid }}
+      deploy-foundation: ${{ steps.get-conditions.outputs.deploy-foundation }}
+      deploy-data: ${{ steps.get-conditions.outputs.deploy-data }}
+      deploy-compute: ${{ steps.get-conditions.outputs.deploy-compute }}
+      deploy-services: ${{ steps.get-conditions.outputs.deploy-services }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Full history for git diff
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml
+
+      - name: Run change detection
+        id: detect
+        run: |
+          python scripts/pre-ci/change-detection.py \
+            --config config/change-detection-config.yaml \
+            --base origin/main \
+            --head HEAD \
+            --output change-metadata.json
+
+      - name: Prepare change metadata
+        id: prepare-meta
+        run: |
+          python scripts/pre-ci/prepare-change-meta.py \
+            --metadata change-metadata.json \
+            --config config/change-detection-config.yaml \
+            --output change-metadata-enhanced.json
+          echo "metadata=$(cat change-metadata-enhanced.json | jq -c .)" >> $GITHUB_OUTPUT
+
+      - name: Validate change impact
+        id: validate
+        run: |
+          python scripts/pre-ci/validate-change-impact.py \
+            --metadata change-metadata-enhanced.json || echo "is-valid=false" >> $GITHUB_OUTPUT
+          echo "is-valid=true" >> $GITHUB_OUTPUT
+
+      - name: Extract CloudFormation conditions
+        id: get-conditions
+        run: |
+          CONDITIONS=$(python -c "
+            import json
+            with open('change-metadata-enhanced.json') as f:
+              data = json.load(f)
+              conditions = data.get('cloudformation_conditions', {})
+              print('deploy-foundation=' + str(conditions.get('DeployFoundationStack', 'true')).lower())
+              print('deploy-data=' + str(conditions.get('DeployDataStack', 'true')).lower())
+              print('deploy-compute=' + str(conditions.get('DeployComputeStack', 'true')).lower())
+              print('deploy-services=' + str(conditions.get('DeployServicesStack', 'true')).lower())
+          ")
+          echo "$CONDITIONS" >> $GITHUB_OUTPUT
+
+      - name: Upload metadata artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: change-metadata
+          path: change-metadata-enhanced.json
+          retention-days: 30
+
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    needs: change-detection
+    if: needs.change-detection.outputs.has-changes == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download metadata
+        uses: actions/download-artifact@v3
+        with:
+          name: change-metadata
+
+      - name: Display affected resources
+        run: |
+          python -c "
+            import json
+            with open('change-metadata-enhanced.json') as f:
+              metadata = json.load(f)
+              print('Affected Resources:')
+              for resource in metadata.get('affected_resources', []):
+                print(f\"  - {resource['file']} ({resource['resource_type']})\")
+              print(f\"\nRequired Actions: {', '.join(metadata.get('required_actions', []))}\")
+          "
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build with Gradle
+        run: ./gradlew build --info
+
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: build/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs: [change-detection, build]
+    if: github.ref == 'refs/heads/main' && needs.change-detection.outputs.has-changes == 'true'
+    environment:
+      name: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+          path: build/
+
+      - name: Download change metadata
+        uses: actions/download-artifact@v3
+        with:
+          name: change-metadata
+
+      - name: Deploy CloudFormation Stack
+        run: |
+          ENV_FILE="${{ env.CONFIG_DIR }}/prod/app.json"
+          
+          aws cloudformation deploy \
+            --region ${{ env.AWS_REGION }} \
+            --template-file cloudformation/stacks/app.yaml \
+            --stack-name app1-prod \
+            --parameter-overrides \
+              $(jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' "$ENV_FILE") \
+              DeployFoundationStack=${{ needs.change-detection.outputs.deploy-foundation }} \
+              DeployDataStack=${{ needs.change-detection.outputs.deploy-data }} \
+              DeployComputeStack=${{ needs.change-detection.outputs.deploy-compute }} \
+              DeployServicesStack=${{ needs.change-detection.outputs.deploy-services }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Validate deployment
+        run: |
+          python -c "
+            import json
+            with open('change-metadata-enhanced.json') as f:
+              metadata = json.load(f)
+              print('✅ Deployment complete')
+              print(f\"Deployed stacks: {[k for k,v in metadata['deployment_checklist'].items() if v]}\")
+          "
+
+      - name: Create deployment summary
+        if: always()
+        run: |
+          cat > deployment-summary.md << 'EOF'
+          # Deployment Summary
+          
+          ## Change Detection Results
+          $(python -c "
+            import json
+            with open('change-metadata-enhanced.json') as f:
+              metadata = json.load(f)
+              print(f\"- **Files Changed**: {metadata['changed_files_count']}\")
+              print(f\"- **Resources Affected**: {len(metadata['affected_resources'])}\")
+              print(f\"- **Required Actions**: {', '.join(metadata['required_actions'])}\")
+          ")
+          
+          ## CloudFormation Conditions Applied
+          - DeployFoundationStack: ${{ needs.change-detection.outputs.deploy-foundation }}
+          - DeployDataStack: ${{ needs.change-detection.outputs.deploy-data }}
+          - DeployComputeStack: ${{ needs.change-detection.outputs.deploy-compute }}
+          - DeployServicesStack: ${{ needs.change-detection.outputs.deploy-services }}
+          EOF
+          cat deployment-summary.md

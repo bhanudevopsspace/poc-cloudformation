@@ -1,0 +1,196 @@
+# Change Detection Configuration
+# Maps file patterns to resource types, impact levels, target stacks, and required actions
+
+exclusions:
+  patterns:
+    - "**/*.gradle"
+    - "**/*.jar"
+    - "**/.gradle/**"
+    - "**/.idea/**"
+    - "**/build/**"
+    - "**/target/**"
+    - "**/.git/**"
+    - "**/cloudformation/**"  # Don't re-detect CF templates as code changes
+    - "**/README.md"
+    - "**/.gitignore"
+    - "**/node_modules/**"
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+  description: "Build artifacts, IDE files, tests, and CloudFormation templates themselves"
+
+resourceMappings:
+  # Foundation Stack (VPC, Networking)
+  vpc_config:
+    patterns:
+      - "cloudformation/modules/vpc.yaml"
+      - "infrastructure/network/**"
+      - "config/**/network*.json"
+    resource_type: "AWS::EC2::VPC"
+    impact_level: "CRITICAL"
+    target_stack: "foundation"
+    affected_child_stacks:
+      - "VPC"
+    required_actions:
+      - "update"
+    description: "VPC and networking configuration changes"
+
+  # Compute Stack (EC2)
+  ec2_code:
+    patterns:
+      - "modules/ec2/**"
+      - "src/ec2/**"
+      - "config/**/ec2*.json"
+    resource_type: "AWS::EC2::Instance"
+    impact_level: "HIGH"
+    target_stack: "compute"
+    affected_child_stacks:
+      - "EC2"
+    required_actions:
+      - "build"
+      - "update"
+    description: "EC2 instance configuration and code"
+
+  # Compute Stack (Lambda)
+  lambda_code:
+    patterns:
+      - "lambda-*/src/**"
+      - "lambda-*/**/*.py"
+      - "lambda-*/**/*.java"
+      - "lambda-*/**/*.js"
+      - "lambda-*/**/*.ts"
+      - "modules/lambda/**"
+      - "cloudformation/modules/lambda.yaml"
+    resource_type: "AWS::Lambda::Function"
+    impact_level: "HIGH"
+    target_stack: "compute"
+    affected_child_stacks:
+      - "Lambda"
+    required_actions:
+      - "build"
+      - "package"
+      - "upload"
+      - "update"
+    description: "Lambda function code and configuration"
+
+  # Data Stack (S3)
+  s3_config:
+    patterns:
+      - "cloudformation/modules/s3.yaml"
+      - "config/**/s3*.json"
+      - "modules/s3/**"
+    resource_type: "AWS::S3::Bucket"
+    impact_level: "HIGH"
+    target_stack: "data"
+    affected_child_stacks:
+      - "S3"
+    required_actions:
+      - "update"
+    description: "S3 bucket configuration and policies"
+
+  # Services Stack (SQS)
+  sqs_config:
+    patterns:
+      - "cloudformation/modules/sqs.yaml"
+      - "config/**/sqs*.json"
+      - "modules/sqs/**"
+    resource_type: "AWS::SQS::Queue"
+    impact_level: "MEDIUM"
+    target_stack: "services"
+    affected_child_stacks:
+      - "SQS"
+    required_actions:
+      - "update"
+    description: "SQS queue configuration"
+
+  # Utility Libraries (CRITICAL - triggers dependent rebuilds)
+  utility_libraries:
+    patterns:
+      - "lib/**"
+      - "shared/**"
+      - "common/**"
+      - "utils/**"
+      - "src/main/java/com/example/util/**"
+      - "src/main/java/com/example/common/**"
+    resource_type: "LIBRARY"
+    impact_level: "CRITICAL"
+    target_stack: "all"
+    affected_child_stacks:
+      - "Lambda"
+      - "EC2"
+    required_actions:
+      - "build"
+      - "rebuild_dependents"
+    description: "Shared utility libraries - changes force rebuild of all dependent modules"
+
+  # Configuration Files
+  app_config:
+    patterns:
+      - "config/**/*.json"
+      - "config/**/*.yaml"
+      - "config/**/*.yml"
+    resource_type: "CONFIG"
+    impact_level: "MEDIUM"
+    target_stack: "application"
+    affected_child_stacks: []
+    required_actions:
+      - "update_config"
+    description: "Application configuration files"
+
+  # Foundation Stack (IAM Policy)
+  iam_policy_readonly:
+    patterns:
+      - "cloudformation/modules/iam-policy-readonly.yaml"
+    resource_type: "AWS::IAM::ManagedPolicy"
+    impact_level: "HIGH"
+    target_stack: "foundation"
+    affected_child_stacks:
+      - "IAMPolicy"
+    required_actions:
+      - "update"
+    description: "IAM read-only managed policy configuration"
+
+  # Foundation Stack (IAM Role)
+  iam_role:
+    patterns:
+      - "cloudformation/modules/iam-role.yaml"
+    resource_type: "AWS::IAM::Role"
+    impact_level: "HIGH"
+    target_stack: "foundation"
+    affected_child_stacks:
+      - "IAMRole"
+    required_actions:
+      - "update"
+    description: "IAM role configuration"
+
+deploymentChecklist:
+  foundation:
+    description: "VPC, subnets, security groups"
+    stacks:
+      - "VPC"
+  data:
+    description: "S3 buckets, databases"
+    stacks:
+      - "S3"
+  compute:
+    description: "EC2 instances, Lambda functions"
+    stacks:
+      - "EC2"
+      - "Lambda"
+  services:
+    description: "SQS, SNS, messaging"
+    stacks:
+      - "SQS"
+  observability:
+    description: "CloudWatch, monitoring, logging"
+    stacks: []
+  application:
+    description: "Application-level configuration"
+    stacks: []
+
+cloudFormationConditionMapping:
+  foundation: "DeployFoundationStack"
+  data: "DeployDataStack"
+  compute: "DeployComputeStack"
+  services: "DeployServicesStack"
+  observability: "DeployObservabilityStack"
+  application: "DeployApplicationStack"

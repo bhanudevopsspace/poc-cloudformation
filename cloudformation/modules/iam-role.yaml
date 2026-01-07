@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IAM Role Module - Assumes read-only access'
+
+Parameters:
+  RoleName:
+    Type: String
+    Default: ReadOnlyRole
+    Description: Name of the IAM role
+  
+  AssumeRoleServicePrincipal:
+    Type: CommaDelimitedList
+    Default: ec2.amazonaws.com,lambda.amazonaws.com
+    Description: Service principals that can assume this role (comma-delimited)
+  
+  ReadOnlyPolicyArn:
+    Type: String
+    Description: ARN of the read-only managed policy to attach
+  
+  MaxSessionDuration:
+    Type: Number
+    Default: 3600
+    MinValue: 900
+    MaxValue: 43200
+    Description: Max session duration in seconds (900 to 43200, default 3600)
+
+Resources:
+  ReadOnlyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: Role with read-only access to AWS resources
+      MaxSessionDuration: !Ref MaxSessionDuration
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Ref AssumeRoleServicePrincipal
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Ref ReadOnlyPolicyArn
+
+  # Instance profile for EC2 instances
+  ReadOnlyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ReadOnlyRole
+
+Outputs:
+  RoleArn:
+    Description: ARN of the read-only role
+    Value: !GetAtt ReadOnlyRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+  
+  RoleName:
+    Description: Name of the read-only role
+    Value: !Ref ReadOnlyRole
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+  
+  InstanceProfileArn:
+    Description: ARN of the instance profile
+    Value: !GetAtt ReadOnlyInstanceProfile.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'
+  
+  InstanceProfileName:
+    Description: Name of the instance profile
+    Value: !Ref ReadOnlyInstanceProfile
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileName'

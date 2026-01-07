@@ -3,5 +3,11 @@
   "VpcCidr": "10.0.0.0/16",
   "PublicSubnetCidr": "10.0.1.0/24",
   "PrivateSubnetCidr": "10.0.2.0/24",
-  "KeyName": "cft-dev"
+  "KeyName": "cft-dev",
+  "DeployFoundationStack": "true",
+  "DeployDataStack": "true",
+  "DeployComputeStack": "true",
+  "DeployServicesStack": "true",
+  "DeployObservabilityStack": "false",
+  "DeployApplicationStack": "false"
 }

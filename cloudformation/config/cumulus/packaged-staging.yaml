@@ -1,0 +1,47 @@
+Parameters:
+  Env:
+    Type: String
+Resources:
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/3fe18835e41b2e1db0fa1172204d5853.template
+      Parameters:
+        Environment:
+          Ref: Env
+        BaseName:
+          Ref: AWS::StackName
+        PolicyBaseName: readonly
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/0fc50d3a09795830dc898c166adccee9.template
+      Parameters:
+        RoleName:
+          Fn::Sub: ${AWS::StackName}-${Env}
+        ReadOnlyPolicyArn:
+          Fn::GetAtt:
+          - IAMPolicy
+          - Outputs.ReadOnlyPolicyArn
+        GuardrailPolicyArn:
+          Fn::GetAtt:
+          - IAMPolicy
+          - Outputs.GuardrailPolicyArn
+Outputs:
+  RoleArn:
+    Value:
+      Fn::GetAtt:
+      - IAMRole
+      - Outputs.RoleArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-RoleArn
+  InstanceProfileArn:
+    Value:
+      Fn::GetAtt:
+      - IAMRole
+      - Outputs.InstanceProfileArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-InstanceProfileArn

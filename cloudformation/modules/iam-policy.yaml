@@ -1,20 +1,52 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'IAM Policies Module - Generic policies for multiple applications'
 
+Parameters:
+  Environment:
+    Type: String
+    Default: ""
+    Description: Optional environment suffix to ensure unique ManagedPolicy names (e.g., dev, staging)
+  BaseName:
+    Type: String
+    Default: ""
+    Description: Base name to scope resources and build names (pass parent stack name)
+  PolicyBaseName:
+    Type: String
+    Default: "readonly"
+    Description: Logical policy name segment to include in ManagedPolicy name (e.g., readonly)
+
+Conditions:
+  HasEnvironment: !Not [ !Equals [ !Ref Environment, "" ] ]
+
 Resources:
   # ========================================
-  # APPLICATION 1 POLICY
+  # GENERIC READ-ONLY POLICY
   # ========================================
-  
-  Application1ReadOnlyPolicy:
+  GenericReadOnlyPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: 'App1-ReadOnly'
-      Description: Read-only policy for Application1 resources
+      ManagedPolicyName: !If 
+        - HasEnvironment
+        - !Sub 
+          - '${Base}-${Env}-${PolicyBase}-${Unique}'
+          - {
+              Base: !Ref BaseName,
+              Env: !Ref Environment,
+              PolicyBase: !Ref PolicyBaseName,
+              Unique: !Select [ 4, !Split [ '-', !Select [ 2, !Split [ '/', !Ref 'AWS::StackId' ] ] ] ]
+            }
+        - !Sub 
+          - '${Base}-${PolicyBase}-${Unique}'
+          - {
+              Base: !Ref BaseName,
+              PolicyBase: !Ref PolicyBaseName,
+              Unique: !Select [ 4, !Split [ '-', !Select [ 2, !Split [ '/', !Ref 'AWS::StackId' ] ] ] ]
+            }
+      Description: Generic read-only policy scoped to resources by BaseName
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: App1S3ReadOnly
+          - Sid: S3ReadOnly
             Effect: Allow
             Action:
               - 's3:GetObject'
@@ -22,36 +54,32 @@ Resources:
               - 's3:GetBucketVersioning'
               - 's3:GetBucketLocation'
             Resource:
-              - 'arn:aws:s3:::app1-*'
-              - 'arn:aws:s3:::app1-*/*'
-          
-          - Sid: App1LambdaReadOnly
+              - !Sub 'arn:aws:s3:::${BaseName}-*'
+              - !Sub 'arn:aws:s3:::${BaseName}-*/*'
+          - Sid: LambdaReadOnly
             Effect: Allow
             Action:
               - 'lambda:GetFunction'
               - 'lambda:GetFunctionConfiguration'
               - 'lambda:ListFunctions'
               - 'lambda:ListAliases'
-            Resource: !Sub 'arn:aws:lambda:*:${AWS::AccountId}:function:app1-*'
-          
-          - Sid: App1SQSReadOnly
+            Resource: !Sub 'arn:aws:lambda:*:${AWS::AccountId}:function:${BaseName}-*'
+          - Sid: SQSReadOnly
             Effect: Allow
             Action:
               - 'sqs:GetQueueAttributes'
               - 'sqs:ListQueues'
               - 'sqs:ReceiveMessage'
-            Resource: !Sub 'arn:aws:sqs:*:${AWS::AccountId}:app1-*'
-          
-          - Sid: App1CloudFormationReadOnly
+            Resource: !Sub 'arn:aws:sqs:*:${AWS::AccountId}:${BaseName}-*'
+          - Sid: CloudFormationReadOnly
             Effect: Allow
             Action:
               - 'cloudformation:DescribeStacks'
               - 'cloudformation:DescribeStackEvents'
               - 'cloudformation:DescribeStackResource'
               - 'cloudformation:ListStacks'
-            Resource: !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/app1-*'
-          
-          - Sid: App1CloudWatchReadOnly
+            Resource: !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/${BaseName}-*'
+          - Sid: CloudWatchReadOnly
             Effect: Allow
             Action:
               - 'logs:Describe*'
@@ -60,75 +88,7 @@ Resources:
               - 'cloudwatch:DescribeAlarms'
               - 'cloudwatch:GetMetricStatistics'
             Resource: '*'
-          
-          - Sid: App1EC2ReadOnly
-            Effect: Allow
-            Action:
-              - 'ec2:DescribeInstances'
-              - 'ec2:DescribeSecurityGroups'
-              - 'ec2:DescribeVpcs'
-            Resource: '*'
-
-  # ========================================
-  # APPLICATION 2 POLICY
-  # ========================================
-  
-  Application2ReadOnlyPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
-      ManagedPolicyName: 'App2-ReadOnly'
-      Description: Read-only policy for Application2 resources
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: App2S3ReadOnly
-            Effect: Allow
-            Action:
-              - 's3:GetObject'
-              - 's3:ListBucket'
-              - 's3:GetBucketVersioning'
-              - 's3:GetBucketLocation'
-            Resource:
-              - 'arn:aws:s3:::app2-*'
-              - 'arn:aws:s3:::app2-*/*'
-          
-          - Sid: App2LambdaReadOnly
-            Effect: Allow
-            Action:
-              - 'lambda:GetFunction'
-              - 'lambda:GetFunctionConfiguration'
-              - 'lambda:ListFunctions'
-              - 'lambda:ListAliases'
-            Resource: !Sub 'arn:aws:lambda:*:${AWS::AccountId}:function:app2-*'
-          
-          - Sid: App2SQSReadOnly
-            Effect: Allow
-            Action:
-              - 'sqs:GetQueueAttributes'
-              - 'sqs:ListQueues'
-              - 'sqs:ReceiveMessage'
-            Resource: !Sub 'arn:aws:sqs:*:${AWS::AccountId}:app2-*'
-          
-          - Sid: App2CloudFormationReadOnly
-            Effect: Allow
-            Action:
-              - 'cloudformation:DescribeStacks'
-              - 'cloudformation:DescribeStackEvents'
-              - 'cloudformation:DescribeStackResource'
-              - 'cloudformation:ListStacks'
-            Resource: !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/app2-*'
-          
-          - Sid: App2CloudWatchReadOnly
-            Effect: Allow
-            Action:
-              - 'logs:Describe*'
-              - 'logs:Get*'
-              - 'logs:List*'
-              - 'cloudwatch:DescribeAlarms'
-              - 'cloudwatch:GetMetricStatistics'
-            Resource: '*'
-          
-          - Sid: App2EC2ReadOnly
+          - Sid: EC2ReadOnly
             Effect: Allow
             Action:
               - 'ec2:DescribeInstances'
@@ -143,7 +103,21 @@ Resources:
   ReadOnlyGuardrailPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: 'ReadOnly-Guardrail'
+      ManagedPolicyName: !If 
+        - HasEnvironment
+        - !Sub 
+          - '${Base}-${Env}-guardrail-${Unique}'
+          - {
+              Base: !Ref BaseName,
+              Env: !Ref Environment,
+              Unique: !Select [ 4, !Split [ '-', !Select [ 2, !Split [ '/', !Ref 'AWS::StackId' ] ] ] ]
+            }
+        - !Sub 
+          - '${Base}-guardrail-${Unique}'
+          - {
+              Base: !Ref BaseName,
+              Unique: !Select [ 4, !Split [ '-', !Select [ 2, !Split [ '/', !Ref 'AWS::StackId' ] ] ] ]
+            }
       Description: Deny policy to restrict dangerous actions - enforces read-only access
       PolicyDocument:
         Version: '2012-10-17'
@@ -199,18 +173,12 @@ Resources:
             Resource: '*'
 
 Outputs:
-  # Export all policies - app.yaml will choose which to use
-  Application1PolicyArn:
-    Description: ARN of Application1 read-only policy
-    Value: !GetAtt Application1ReadOnlyPolicy.PolicyArn
+  # Export policy ARNs - parent template will choose which to use
+  ReadOnlyPolicyArn:
+    Description: ARN of generic read-only policy
+    Value: !GetAtt GenericReadOnlyPolicy.PolicyArn
     Export:
-      Name: !Sub '${AWS::StackName}-App1PolicyArn'
-
-  Application2PolicyArn:
-    Description: ARN of Application2 read-only policy
-    Value: !GetAtt Application2ReadOnlyPolicy.PolicyArn
-    Export:
-      Name: !Sub '${AWS::StackName}-App2PolicyArn'
+      Name: !Sub '${AWS::StackName}-ReadOnlyPolicyArn'
 
   GuardrailPolicyArn:
     Description: ARN of guardrail deny policy (applied to all roles)

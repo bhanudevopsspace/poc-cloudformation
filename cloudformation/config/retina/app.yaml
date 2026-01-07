@@ -1,0 +1,34 @@
+Parameters:
+  Env:
+    Type: String
+
+Resources:
+  # Use generic IAM policy module - creates all policies
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../../modules/iam-policy.yaml
+      Parameters:
+        Environment: !Ref Env
+
+  # Application2 needs Application2PolicyArn (different from app1)
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: ../../modules/iam-role.yaml
+      Parameters:
+        RoleName: !Sub 'ReadOnlyRole-app2-${Env}'
+        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.Application2PolicyArn
+        GuardrailPolicyArn: !GetAtt IAMPolicy.Outputs.GuardrailPolicyArn
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt IAMRole.Outputs.RoleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+  
+  InstanceProfileArn:
+    Value: !GetAtt IAMRole.Outputs.InstanceProfileArn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'

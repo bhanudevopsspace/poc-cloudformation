@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Storage domain stack for cumulus (S3, databases)'
+
+Parameters:
+  Env:
+    Type: String
+    Description: Deployment environment (e.g., dev, staging, prod)
+
+Resources:
+  # S3 buckets (example - uses existing module)
+  S3Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../../modules/s3.yaml
+      Parameters:
+        Env: !Ref Env
+
+# Add other storage nested stacks here, e.g., DynamoDB, RDS
+
+Outputs:
+  # Bubble up any storage outputs as needed
+  BucketName:
+    Value: !GetAtt S3Stack.Outputs.BucketName
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'

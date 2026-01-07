@@ -172,6 +172,35 @@ Resources:
               - 'iam:*'
             Resource: '*'
 
+  # ========================================
+  # S3 LIST POLICY (Optional - for specific environments)
+  # ========================================
+  S3ListPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !If 
+        - HasEnvironment
+        - !Sub 
+          - '${Base}-${Env}-s3-list-${Unique}'
+          - {
+              Base: !Ref BaseName,
+              Env: !Ref Environment,
+              Unique: !Select [ 4, !Split [ '-', !Select [ 2, !Split [ '/', !Ref 'AWS::StackId' ] ] ] ]
+            }
+        - !Sub 
+          - '${Base}-s3-list-${Unique}'
+          - {
+              Base: !Ref BaseName,
+              Unique: !Select [ 4, !Split [ '-', !Select [ 2, !Split [ '/', !Ref 'AWS::StackId' ] ] ] ]
+            }
+      Description: S3 list all buckets policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 's3:ListAllMyBuckets'
+            Resource: '*'
+
 Outputs:
   # Export policy ARNs - parent template will choose which to use
   ReadOnlyPolicyArn:
@@ -185,3 +214,9 @@ Outputs:
     Value: !GetAtt ReadOnlyGuardrailPolicy.PolicyArn
     Export:
       Name: !Sub '${AWS::StackName}-GuardrailPolicyArn'
+
+  S3ListPolicyArn:
+    Description: ARN of S3 list all buckets policy
+    Value: !GetAtt S3ListPolicy.PolicyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-S3ListPolicyArn'

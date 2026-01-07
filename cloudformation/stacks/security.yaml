@@ -1,10 +1,15 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Security domain stack for cumulus (IAM policies and roles)'
+
 Parameters:
   Env:
     Type: String
-  
+    Description: Deployment environment (e.g., dev, staging, prod)
+
+Conditions:
+  IsStaging: !Equals [ !Ref Env, "staging" ]
 
 Resources:
-  # Use generic IAM policy module - creates all policies
   IAMPolicy:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -14,7 +19,6 @@ Resources:
         BaseName: !Ref AWS::StackName
         PolicyBaseName: readonly
 
-  # Application1 only needs Application1PolicyArn
   IAMRole:
     Type: AWS::CloudFormation::Stack
     DependsOn: IAMPolicy
@@ -25,12 +29,18 @@ Resources:
         ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.ReadOnlyPolicyArn
         GuardrailPolicyArn: !GetAtt IAMPolicy.Outputs.GuardrailPolicyArn
 
+  S3ListPolicyAttachment:
+    Type: AWS::IAM::RolePolicyAttachment
+    Condition: IsStaging
+    Properties:
+      RoleName: !GetAtt IAMRole.Outputs.RoleName
+      ManagedPolicyArn: !GetAtt IAMPolicy.Outputs.S3ListPolicyArn
+
 Outputs:
   RoleArn:
     Value: !GetAtt IAMRole.Outputs.RoleArn
     Export:
       Name: !Sub '${AWS::StackName}-RoleArn'
-  
   InstanceProfileArn:
     Value: !GetAtt IAMRole.Outputs.InstanceProfileArn
     Export:

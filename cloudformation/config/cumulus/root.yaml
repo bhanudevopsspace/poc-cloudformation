@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Root stack for cumulus - orchestrates infra, storage, and security layers'
+
+Parameters:
+  Env:
+    Type: String
+    Description: Deployment environment (e.g., dev, staging, prod)
+
+Resources:
+  InfraStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./infra.yaml
+      Parameters:
+        Env: !Ref Env
+
+  StorageStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./storage.yaml
+      Parameters:
+        Env: !Ref Env
+
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: InfraStack
+    Properties:
+      TemplateURL: ./security.yaml
+      Parameters:
+        Env: !Ref Env
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt SecurityStack.Outputs.RoleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  InstanceProfileArn:
+    Value: !GetAtt SecurityStack.Outputs.InstanceProfileArn
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceProfileArn'

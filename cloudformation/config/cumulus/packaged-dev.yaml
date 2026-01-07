@@ -1,11 +1,16 @@
 Parameters:
   Env:
     Type: String
+Conditions:
+  IsStaging:
+    Fn::Equals:
+    - Ref: Env
+    - staging
 Resources:
   IAMPolicy:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/3fe18835e41b2e1db0fa1172204d5853.template
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/3a5d9e735a44d78d761fb865d9cc8ca0.template
       Parameters:
         Environment:
           Ref: Env
@@ -28,6 +33,18 @@ Resources:
           Fn::GetAtt:
           - IAMPolicy
           - Outputs.GuardrailPolicyArn
+  S3ListPolicyAttachment:
+    Type: AWS::IAM::RolePolicyAttachment
+    Condition: IsStaging
+    Properties:
+      RoleName:
+        Fn::GetAtt:
+        - IAMRole
+        - Outputs.RoleName
+      ManagedPolicyArn:
+        Fn::GetAtt:
+        - IAMPolicy
+        - Outputs.S3ListPolicyArn
 Outputs:
   RoleArn:
     Value:

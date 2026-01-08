@@ -1,5 +1,6 @@
 # Change Detection Configuration
-# Maps file patterns to resource types, impact levels, target stacks, and required actions
+# Maps file patterns to resource types, impact levels, target layers, and required actions
+# NOW ORGANIZED BY FUNCTION-BASED LAYERS (not domain stacks)
 
 exclusions:
   patterns:
@@ -19,38 +20,44 @@ exclusions:
   description: "Build artifacts, IDE files, tests, and CloudFormation templates themselves"
 
 resourceMappings:
-  # Foundation Stack (VPC, Networking)
-  vpc_config:
+  # ========================================
+  # VPC LAYER (Foundation - Networking)
+  # ========================================
+  vpc_layer:
     patterns:
-      - "cloudformation/modules/vpc.yaml"
+      - "cloudformation/layers/vpc-layer.yaml"
       - "infrastructure/network/**"
       - "config/**/network*.json"
+      - "config/**/vpc*.json"
     resource_type: "AWS::EC2::VPC"
     impact_level: "CRITICAL"
-    target_stack: "foundation"
+    target_stack: "vpc_layer"
     affected_child_stacks:
       - "VPC"
+      - "Subnets"
+      - "InternetGateway"
+      - "NatGateway"
     required_actions:
       - "update"
-    description: "VPC and networking configuration changes"
+    description: "VPC layer changes - affects networking foundation"
 
-  # Compute Stack (EC2)
-  ec2_code:
+  # ========================================
+  # LAMBDA LAYER (Functions + IAM)
+  # ========================================
+  lambda_layer_template:
     patterns:
-      - "modules/ec2/**"
-      - "src/ec2/**"
-      - "config/**/ec2*.json"
-    resource_type: "AWS::EC2::Instance"
+      - "cloudformation/layers/lambda-layer.yaml"
+    resource_type: "AWS::Lambda::Function"
     impact_level: "HIGH"
-    target_stack: "compute"
+    target_stack: "lambda_layer"
     affected_child_stacks:
-      - "EC2"
+      - "LambdaFunction"
+      - "LambdaExecutionRole"
+      - "LambdaExecutionPolicy"
     required_actions:
-      - "build"
       - "update"
-    description: "EC2 instance configuration and code"
+    description: "Lambda layer template changes"
 
-  # Compute Stack (Lambda)
   lambda_code:
     patterns:
       - "lambda-*/src/**"
@@ -58,51 +65,101 @@ resourceMappings:
       - "lambda-*/**/*.java"
       - "lambda-*/**/*.js"
       - "lambda-*/**/*.ts"
-      - "modules/lambda/**"
-      - "cloudformation/modules/lambda.yaml"
+      - "src/lambda/**"
+      - "functions/**"
     resource_type: "AWS::Lambda::Function"
     impact_level: "HIGH"
-    target_stack: "compute"
+    target_stack: "lambda_layer"
     affected_child_stacks:
-      - "Lambda"
+      - "LambdaFunction"
     required_actions:
       - "build"
       - "package"
       - "upload"
       - "update"
-    description: "Lambda function code and configuration"
+    description: "Lambda function code changes"
 
-  # Data Stack (S3)
-  s3_config:
+  # ========================================
+  # S3 LAYER (Buckets + IAM)
+  # ========================================
+  s3_layer_template:
     patterns:
-      - "cloudformation/modules/s3.yaml"
-      - "config/**/s3*.json"
-      - "modules/s3/**"
+      - "cloudformation/layers/s3-layer.yaml"
     resource_type: "AWS::S3::Bucket"
     impact_level: "HIGH"
-    target_stack: "data"
+    target_stack: "s3_layer"
     affected_child_stacks:
-      - "S3"
+      - "S3Bucket"
+      - "S3AccessRole"
+      - "S3AccessPolicy"
     required_actions:
       - "update"
-    description: "S3 bucket configuration and policies"
+    description: "S3 layer template changes"
 
-  # Services Stack (SQS)
-  sqs_config:
+  s3_config:
     patterns:
-      - "cloudformation/modules/sqs.yaml"
-      - "config/**/sqs*.json"
-      - "modules/sqs/**"
-    resource_type: "AWS::SQS::Queue"
+      - "config/**/s3*.json"
+      - "config/**/bucket*.json"
+    resource_type: "AWS::S3::Bucket"
     impact_level: "MEDIUM"
-    target_stack: "services"
+    target_stack: "s3_layer"
     affected_child_stacks:
-      - "SQS"
+      - "S3Bucket"
     required_actions:
       - "update"
-    description: "SQS queue configuration"
+    description: "S3 bucket configuration changes"
 
-  # Utility Libraries (CRITICAL - triggers dependent rebuilds)
+  # ========================================
+  # EC2 LAYER (Instances + IAM)
+  # ========================================
+  ec2_layer_template:
+    patterns:
+      - "cloudformation/layers/ec2-layer.yaml"
+    resource_type: "AWS::EC2::Instance"
+    impact_level: "HIGH"
+    target_stack: "ec2_layer"
+    affected_child_stacks:
+      - "EC2Instance"
+      - "EC2InstanceRole"
+      - "EC2AccessPolicy"
+      - "EC2SecurityGroup"
+    required_actions:
+      - "update"
+    description: "EC2 layer template changes"
+
+  ec2_code:
+    patterns:
+      - "modules/ec2/**"
+      - "src/ec2/**"
+      - "config/**/ec2*.json"
+    resource_type: "AWS::EC2::Instance"
+    impact_level: "HIGH"
+    target_stack: "ec2_layer"
+    affected_child_stacks:
+      - "EC2Instance"
+    required_actions:
+      - "build"
+      - "update"
+    description: "EC2 instance configuration and code"
+
+  # ========================================
+  # ROOT APPLICATION TEMPLATES
+  # ========================================
+  application_root:
+    patterns:
+      - "cloudformation/applications/*/root.yaml"
+      - "cloudformation/applications/*/app.yaml"
+    resource_type: "AWS::CloudFormation::Stack"
+    impact_level: "HIGH"
+    target_stack: "application"
+    affected_child_stacks: []
+    required_actions:
+      - "update"
+    description: "Application root template changes"
+
+  # ========================================
+  # UTILITY LIBRARIES (CRITICAL - triggers all layers)
+  # ========================================
   utility_libraries:
     patterns:
       - "lib/**"
@@ -120,9 +177,11 @@ resourceMappings:
     required_actions:
       - "build"
       - "rebuild_dependents"
-    description: "Shared utility libraries - changes force rebuild of all dependent modules"
+    description: "Shared utility libraries - changes force rebuild of all dependent layers"
 
-  # Configuration Files
+  # ========================================
+  # CONFIGURATION FILES
+  # ========================================
   app_config:
     patterns:
       - "config/**/*.json"
@@ -136,61 +195,49 @@ resourceMappings:
       - "update_config"
     description: "Application configuration files"
 
-  # Foundation Stack (IAM Policy - All in one file)
-  iam_policy:
-    patterns:
-      - "cloudformation/modules/iam-policy.yaml"
-    resource_type: "AWS::IAM::ManagedPolicy"
-    impact_level: "HIGH"
-    target_stack: "foundation"
-    affected_child_stacks:
-      - "IAMPolicy"
-    required_actions:
-      - "update"
-    description: "IAM policies for all applications - conditionally attaches based on ApplicationType"
-
-  # Foundation Stack (IAM Role)
-  iam_role:
-    patterns:
-      - "cloudformation/modules/iam-role.yaml"
-    resource_type: "AWS::IAM::Role"
-    impact_level: "HIGH"
-    target_stack: "foundation"
-    affected_child_stacks:
-      - "IAMRole"
-    required_actions:
-      - "update"
-    description: "IAM role configuration"
-
+# ========================================
+# DEPLOYMENT CHECKLIST (Layer-based)
+# ========================================
 deploymentChecklist:
-  foundation:
-    description: "VPC, subnets, security groups"
+  vpc_layer:
+    description: "VPC, subnets, internet gateway, NAT gateway"
     stacks:
       - "VPC"
-  data:
-    description: "S3 buckets, databases"
+      - "InternetGateway"
+      - "NatGateway"
+  
+  lambda_layer:
+    description: "Lambda functions with their IAM roles and policies"
     stacks:
-      - "S3"
-  compute:
-    description: "EC2 instances, Lambda functions"
+      - "LambdaFunction"
+      - "LambdaExecutionRole"
+      - "LambdaExecutionPolicy"
+  
+  s3_layer:
+    description: "S3 buckets with their IAM roles and policies"
     stacks:
-      - "EC2"
-      - "Lambda"
-  services:
-    description: "SQS, SNS, messaging"
+      - "S3Bucket"
+      - "S3AccessRole"
+      - "S3AccessPolicy"
+  
+  ec2_layer:
+    description: "EC2 instances with their IAM roles, policies, and security groups"
     stacks:
-      - "SQS"
-  observability:
-    description: "CloudWatch, monitoring, logging"
-    stacks: []
+      - "EC2Instance"
+      - "EC2InstanceRole"
+      - "EC2AccessPolicy"
+      - "EC2SecurityGroup"
+  
   application:
-    description: "Application-level configuration"
+    description: "Application-level configuration and root templates"
     stacks: []
 
+# ========================================
+# CLOUDFORMATION CONDITION MAPPING
+# ========================================
 cloudFormationConditionMapping:
-  foundation: "DeployFoundationStack"
-  data: "DeployDataStack"
-  compute: "DeployComputeStack"
-  services: "DeployServicesStack"
-  observability: "DeployObservabilityStack"
+  vpc_layer: "DeployVpcLayer"
+  lambda_layer: "DeployLambdaLayer"
+  s3_layer: "DeployS3Layer"
+  ec2_layer: "DeployEc2Layer"
   application: "DeployApplicationStack"

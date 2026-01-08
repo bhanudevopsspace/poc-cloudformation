@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EC2 Layer - EC2 instances using generic IAM modules'
+
+Parameters:
+  Env:
+    Type: String
+    Description: Deployment environment (e.g., dev, staging, prod)
+  
+  VpcId:
+    Type: String
+    Description: VPC ID for EC2 instances
+    Default: ""
+  
+  SubnetId:
+    Type: String
+    Description: Subnet ID for EC2 instances
+    Default: ""
+  
+  KeyName:
+    Type: String
+    Description: EC2 Key Pair name
+    Default: ""
+  
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+    Description: EC2 instance type
+  
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: Latest Amazon Linux 2 AMI ID
+
+Conditions:
+  HasVpc: !Not [ !Equals [ !Ref VpcId, "" ] ]
+  HasKeyPair: !Not [ !Equals [ !Ref KeyName, "" ] ]
+  CreateInstance: !And
+    - !Condition HasVpc
+    - !Condition HasKeyPair
+
+Resources:
+  # ========================================
+  # IAM POLICY (Generic Module)
+  # ========================================
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/iam-policy.yaml
+      Parameters:
+        Environment: !Ref Env
+        BaseName: !Ref AWS::StackName
+        PolicyBaseName: ec2
+
+  # ========================================
+  # IAM ROLE (Generic Module)
+  # ========================================
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: ../modules/iam-role.yaml
+      Parameters:
+        RoleName: !Sub '${AWS::StackName}-ec2-role-${Env}'
+        AssumeRoleServicePrincipal: ec2.amazonaws.com
+        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.ReadOnlyPolicyArn
+        GuardrailPolicyArn: !GetAtt IAMPolicy.Outputs.GuardrailPolicyArn
+        MaxSessionDuration: 3600
+
+  # ========================================
+  # SECURITY GROUP
+  # ========================================
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasVpc
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-ec2-sg-${Env}'
+      GroupDescription: Security group for EC2 instances
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/8
+          Description: SSH access from internal network
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2-sg-${Env}'
+        - Key: Environment
+          Value: !Ref Env
+        - Key: Layer
+          Value: EC2
+
+  # ========================================
+  # EC2 INSTANCE
+  # ========================================
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Condition: CreateInstance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !GetAtt IAMRole.Outputs.InstanceProfileName
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y amazon-cloudwatch-agent
+          
+          # Configure CloudWatch agent
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/config.json <<EOF
+          {
+            "logs": {
+              "logs_collected": {
+                "files": {
+                  "collect_list": [
+                    {
+                      "file_path": "/var/log/messages",
+                      "log_group_name": "/aws/ec2/${AWS::StackName}-${Env}",
+                      "log_stream_name": "{instance_id}/messages"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+          EOF
+          
+          # Start CloudWatch agent
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+            -a fetch-config \
+            -m ec2 \
+            -c file:/opt/aws/amazon-cloudwatch-agent/etc/config.json \
+            -s
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-instance-${Env}'
+        - Key: Environment
+          Value: !Ref Env
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Layer
+          Value: EC2
+
+Outputs:
+  EC2RoleArn:
+    Description: ARN of EC2 instance role
+    Value: !GetAtt IAMRole.Outputs.RoleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2RoleArn'
+  
+  EC2PolicyArn:
+    Description: ARN of EC2 policy
+    Value: !GetAtt IAMPolicy.Outputs.ReadOnlyPolicyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2PolicyArn'
+  
+  EC2InstanceProfileArn:
+    Description: ARN of EC2 instance profile
+    Value: !GetAtt IAMRole.Outputs.InstanceProfileArn
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2InstanceProfileArn'
+  
+  EC2SecurityGroupId:
+    Condition: HasVpc
+    Description: ID of EC2 security group
+    Value: !Ref EC2SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2SecurityGroupId'
+  
+  EC2InstanceId:
+    Condition: CreateInstance
+    Description: ID of EC2 instance
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2InstanceId'
+  
+  EC2PrivateIp:
+    Condition: CreateInstance
+    Description: Private IP of EC2 instance
+    Value: !GetAtt EC2Instance.PrivateIp
+    Export:
+      Name: !Sub '${AWS::StackName}-EC2PrivateIp'

@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda Layer - Lambda functions using generic IAM modules'
+
+Parameters:
+  Env:
+    Type: String
+    Description: Deployment environment (e.g., dev, staging, prod)
+  
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+    Default: ""
+  
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key for Lambda deployment package
+    Default: "lambda-function.zip"
+
+Conditions:
+  HasLambdaCode: !Not [ !Equals [ !Ref LambdaCodeBucket, "" ] ]
+
+Resources:
+  # ========================================
+  # IAM POLICY (Generic Module)
+  # ========================================
+  IAMPolicy:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/iam-policy.yaml
+      Parameters:
+        Environment: !Ref Env
+        BaseName: !Ref AWS::StackName
+        PolicyBaseName: lambda
+
+  # ========================================
+  # IAM ROLE (Generic Module)
+  # ========================================
+  IAMRole:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: IAMPolicy
+    Properties:
+      TemplateURL: ../modules/iam-role.yaml
+      Parameters:
+        RoleName: !Sub '${AWS::StackName}-lambda-role-${Env}'
+        AssumeRoleServicePrincipal: lambda.amazonaws.com
+        ReadOnlyPolicyArn: !GetAtt IAMPolicy.Outputs.ReadOnlyPolicyArn
+        GuardrailPolicyArn: !GetAtt IAMPolicy.Outputs.GuardrailPolicyArn
+        MaxSessionDuration: 3600
+
+  # ========================================
+  # LAMBDA FUNCTION
+  # ========================================
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasLambdaCode
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-function-${Env}'
+      Description: Lambda function for layer
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt IAMRole.Outputs.RoleArn
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          ENV: !Ref Env
+          STACK_NAME: !Ref AWS::StackName
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+        - Key: Layer
+          Value: Lambda
+
+Outputs:
+  LambdaRoleArn:
+    Description: ARN of Lambda execution role
+    Value: !GetAtt IAMRole.Outputs.RoleArn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaRoleArn'
+  
+  LambdaPolicyArn:
+    Description: ARN of Lambda policy
+    Value: !GetAtt IAMPolicy.Outputs.ReadOnlyPolicyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaPolicyArn'
+  
+  LambdaFunctionArn:
+    Condition: HasLambdaCode
+    Description: ARN of Lambda function
+    Value: !GetAtt LambdaFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+  
+  LambdaFunctionName:
+    Condition: HasLambdaCode
+    Description: Name of Lambda function
+    Value: !Ref LambdaFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName'

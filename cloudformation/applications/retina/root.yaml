@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Root stack for cumulus - orchestrates function-based layers (VPC, Lambda, S3, EC2)'
+Description: 'Retina application - function-based layers (VPC, Lambda, S3)'
 
 Parameters:
   Env:
@@ -8,23 +8,18 @@ Parameters:
   
   VpcCidr:
     Type: String
-    Default: 10.0.0.0/16
+    Default: 10.1.0.0/16
     Description: CIDR block for VPC
   
   PublicSubnetCidr:
     Type: String
-    Default: 10.0.1.0/24
+    Default: 10.1.1.0/24
     Description: CIDR block for public subnet
   
   PrivateSubnetCidr:
     Type: String
-    Default: 10.0.2.0/24
+    Default: 10.1.2.0/24
     Description: CIDR block for private subnet
-  
-  KeyName:
-    Type: String
-    Default: ""
-    Description: EC2 Key Pair name (optional)
   
   DeployVpcLayer:
     Type: String
@@ -40,25 +35,18 @@ Parameters:
   
   DeployLambdaLayer:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues: ["true", "false"]
     Description: Deploy Lambda layer
-  
-  DeployEc2Layer:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Deploy EC2 layer
 
 Conditions:
   ShouldDeployVpc: !Equals [ !Ref DeployVpcLayer, "true" ]
   ShouldDeployS3: !Equals [ !Ref DeployS3Layer, "true" ]
   ShouldDeployLambda: !Equals [ !Ref DeployLambdaLayer, "true" ]
-  ShouldDeployEc2: !Equals [ !Ref DeployEc2Layer, "true" ]
 
 Resources:
   # ========================================
-  # VPC LAYER (Foundation - Deploy First)
+  # VPC LAYER (Foundation)
   # ========================================
   VpcLayer:
     Type: AWS::CloudFormation::Stack
@@ -71,11 +59,6 @@ Resources:
         PublicSubnetCidr: !Ref PublicSubnetCidr
         PrivateSubnetCidr: !Ref PrivateSubnetCidr
         EnableNatGateway: "true"
-      Tags:
-        - Key: Layer
-          Value: VPC
-        - Key: Environment
-          Value: !Ref Env
 
   # ========================================
   # S3 LAYER
@@ -89,11 +72,6 @@ Resources:
         Env: !Ref Env
         EnableVersioning: "true"
         EnableEncryption: "true"
-      Tags:
-        - Key: Layer
-          Value: S3
-        - Key: Environment
-          Value: !Ref Env
 
   # ========================================
   # LAMBDA LAYER
@@ -106,33 +84,7 @@ Resources:
       Parameters:
         Env: !Ref Env
         LambdaCodeBucket: ""
-        LambdaCodeKey: "lambda-function.zip"
-      Tags:
-        - Key: Layer
-          Value: Lambda
-        - Key: Environment
-          Value: !Ref Env
-
-  # ========================================
-  # EC2 LAYER (Depends on VPC)
-  # ========================================
-  Ec2Layer:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployEc2
-    DependsOn: VpcLayer
-    Properties:
-      TemplateURL: ../../layers/ec2-layer.yaml
-      Parameters:
-        Env: !Ref Env
-        VpcId: !If [ ShouldDeployVpc, !GetAtt VpcLayer.Outputs.VpcId, "" ]
-        SubnetId: !If [ ShouldDeployVpc, !GetAtt VpcLayer.Outputs.PrivateSubnetId, "" ]
-        KeyName: !Ref KeyName
-        InstanceType: "t3.micro"
-      Tags:
-        - Key: Layer
-          Value: EC2
-        - Key: Environment
-          Value: !Ref Env
+        LambdaCodeKey: "retina-lambda.zip"
 
 Outputs:
   # VPC Outputs
@@ -142,20 +94,6 @@ Outputs:
     Value: !GetAtt VpcLayer.Outputs.VpcId
     Export:
       Name: !Sub '${AWS::StackName}-VpcId'
-  
-  PublicSubnetId:
-    Condition: ShouldDeployVpc
-    Description: Public subnet ID
-    Value: !GetAtt VpcLayer.Outputs.PublicSubnetId
-    Export:
-      Name: !Sub '${AWS::StackName}-PublicSubnetId'
-  
-  PrivateSubnetId:
-    Condition: ShouldDeployVpc
-    Description: Private subnet ID
-    Value: !GetAtt VpcLayer.Outputs.PrivateSubnetId
-    Export:
-      Name: !Sub '${AWS::StackName}-PrivateSubnetId'
   
   # S3 Outputs
   DataBucketName:
@@ -179,11 +117,3 @@ Outputs:
     Value: !GetAtt LambdaLayer.Outputs.LambdaRoleArn
     Export:
       Name: !Sub '${AWS::StackName}-LambdaRoleArn'
-  
-  # EC2 Outputs
-  EC2RoleArn:
-    Condition: ShouldDeployEc2
-    Description: EC2 instance role ARN
-    Value: !GetAtt Ec2Layer.Outputs.EC2RoleArn
-    Export:
-      Name: !Sub '${AWS::StackName}-EC2RoleArn'

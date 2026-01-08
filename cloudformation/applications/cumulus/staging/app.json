@@ -1,3 +1,11 @@
 {
-  "Env": "staging"
+  "Env": "staging",
+  "VpcCidr": "10.0.0.0/16",
+  "PublicSubnetCidr": "10.0.1.0/24",
+  "PrivateSubnetCidr": "10.0.2.0/24",
+  "KeyName": "cumulus-staging-key",
+  "DeployVpcLayer": "true",
+  "DeployS3Layer": "true",
+  "DeployLambdaLayer": "false",
+  "DeployEc2Layer": "true"
 }

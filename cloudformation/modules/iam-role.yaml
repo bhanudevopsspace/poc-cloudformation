@@ -1,78 +1,58 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'IAM Role Module - Generic role that accepts policy ARNs'
+Description: 'Reusable IAM Role module'
 
 Parameters:
   RoleName:
     Type: String
-    Default: ReadOnlyRole
     Description: Name of the IAM role
   
-  AssumeRoleServicePrincipal:
+  ServicePrincipal:
+    Type: String
+    Description: Service principal that can assume this role
+    Default: lambda.amazonaws.com
+  
+  ManagedPolicyArns:
     Type: CommaDelimitedList
-    Default: ec2.amazonaws.com,lambda.amazonaws.com
-    Description: Service principals that can assume this role (comma-delimited)
-  
-  ReadOnlyPolicyArn:
-    Type: String
-    Description: ARN of the read-only managed policy to attach
-  
-  GuardrailPolicyArn:
-    Type: String
-    Description: ARN of the guardrail deny policy to attach
+    Description: Comma-separated list of managed policy ARNs to attach
+    Default: ''
   
   MaxSessionDuration:
     Type: Number
     Default: 3600
-    MinValue: 900
+    MinValue: 3600
     MaxValue: 43200
-    Description: Max session duration in seconds (900 to 43200, default 3600)
+    Description: Max session duration in seconds
+
+Conditions:
+  HasManagedPolicies: !Not [!Equals [!Join ['', !Ref ManagedPolicyArns], '']]
 
 Resources:
-  ReadOnlyRole:
+  IAMRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Ref RoleName
-      Description: Read-only role with guardrail protections
       MaxSessionDuration: !Ref MaxSessionDuration
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
-              Service: !Ref AssumeRoleServicePrincipal
+              Service: !Ref ServicePrincipal
             Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - !Ref ReadOnlyPolicyArn
-        - !Ref GuardrailPolicyArn
-
-  # Instance profile for EC2 instances
-  ReadOnlyInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref ReadOnlyRole
+      ManagedPolicyArns: !If [HasManagedPolicies, !Ref ManagedPolicyArns, !Ref AWS::NoValue]
+      Tags:
+        - Key: Name
+          Value: !Ref RoleName
 
 Outputs:
   RoleArn:
-    Description: ARN of the read-only role
-    Value: !GetAtt ReadOnlyRole.Arn
+    Description: IAM Role ARN
+    Value: !GetAtt IAMRole.Arn
     Export:
       Name: !Sub '${AWS::StackName}-RoleArn'
   
   RoleName:
-    Description: Name of the read-only role
-    Value: !Ref ReadOnlyRole
+    Description: IAM Role Name
+    Value: !Ref IAMRole
     Export:
       Name: !Sub '${AWS::StackName}-RoleName'
-  
-  InstanceProfileArn:
-    Description: ARN of the instance profile
-    Value: !GetAtt ReadOnlyInstanceProfile.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-InstanceProfileArn'
-  
-  InstanceProfileName:
-    Description: Name of the instance profile
-    Value: !Ref ReadOnlyInstanceProfile
-    Export:
-      Name: !Sub '${AWS::StackName}-InstanceProfileName'

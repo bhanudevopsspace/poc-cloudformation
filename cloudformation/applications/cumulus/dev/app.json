@@ -1,11 +1,12 @@
 {
-  "Env": "dev",
-  "VpcCidr": "10.0.0.0/16",
-  "PublicSubnetCidr": "10.0.1.0/24",
-  "PrivateSubnetCidr": "10.0.2.0/24",
-  "KeyName": "cumulus-dev-key",
-  "DeployVpcLayer": "true",
-  "DeployS3Layer": "true",
-  "DeployLambdaLayer": "false",
-  "DeployEc2Layer": "false"
+  "Environment": "dev",
+  "ApplicationName": "cumulus",
+  "BucketName": "",
+  "VersioningEnabled": "Enabled",
+  "LifecycleExpirationDays": "90",
+  "SSMParameterValue": "dev-config-value",
+  "LambdaCodeBucket": "cfn-artifacts-us-west-1",
+  "LambdaCodeKey": "lambda-code.zip",
+  "LambdaRoleArn": "arn:aws:iam::654654233431:role/cumulus-dev-lambda-role",
+  "SSMParameterName": "/cumulus/dev/config"
 }

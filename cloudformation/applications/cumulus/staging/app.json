@@ -1,11 +1,12 @@
 {
-  "Env": "staging",
-  "VpcCidr": "10.0.0.0/16",
-  "PublicSubnetCidr": "10.0.1.0/24",
-  "PrivateSubnetCidr": "10.0.2.0/24",
-  "KeyName": "cumulus-staging-key",
-  "DeployVpcLayer": "true",
-  "DeployS3Layer": "true",
-  "DeployLambdaLayer": "false",
-  "DeployEc2Layer": "true"
+  "Environment": "staging",
+  "ApplicationName": "cumulus",
+  "BucketName": "",
+  "VersioningEnabled": "Enabled",
+  "LifecycleExpirationDays": "90",
+  "SSMParameterValue": "staging-config-value",
+  "LambdaCodeBucket": "cumulus-cfn-artifacts-us-west-2",
+  "LambdaCodeKey": "lambda-code.zip",
+  "LambdaRoleArn": "arn:aws:iam::654654233431:role/cumulus-staging-lambda-role",
+  "SSMParameterName": "/cumulus/staging/config"
 }

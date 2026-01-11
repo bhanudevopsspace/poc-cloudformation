@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Common Layer - IAM Role, IAM Policy, and SSM Parameters
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+    AllowedValues:
+    - dev
+    - staging
+    - prod
+  ApplicationName:
+    Type: String
+    Description: Name of the application
+  SSMParameterValue:
+    Type: String
+    Description: Value to store in SSM Parameter
+    NoEcho: true
+Resources:
+  LambdaRole:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/9d93b1f83d3598e12fbcec73ae76c89b.template
+      Parameters:
+        RoleName:
+          Fn::Sub: ${ApplicationName}-${Environment}-lambda-role
+        ServicePrincipal: lambda.amazonaws.com
+        ManagedPolicyArns: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  LambdaPolicy:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/330bcd84a2616392288cabdb714cb01c.template
+      Parameters:
+        PolicyName:
+          Fn::Sub: ${ApplicationName}-${Environment}-lambda-policy
+        PolicyDocument:
+          Fn::Sub: "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n\
+            \      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"ssm:GetParameter\"\
+            ,\n        \"ssm:GetParameters\"\n      ],\n      \"Resource\": \"arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ApplicationName}/${Environment}/*\"\
+            \n    },\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n \
+            \       \"s3:ListBucket\",\n        \"s3:GetObject\",\n        \"s3:PutObject\"\
+            \n      ],\n      \"Resource\": [\n        \"arn:aws:s3:::*\"\n      ]\n\
+            \    },\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n  \
+            \      \"kms:Decrypt\",\n        \"kms:GenerateDataKey\"\n      ],\n \
+            \     \"Resource\": \"*\"\n    }\n  ]\n}\n"
+        RoleName:
+          Fn::GetAtt:
+          - LambdaRole
+          - Outputs.RoleName
+  SSMParameter:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/fc445206260ee5fce5769ffa748a475c.template
+      Parameters:
+        ParameterName:
+          Fn::Sub: /${ApplicationName}/${Environment}/config
+        ParameterValue:
+          Ref: SSMParameterValue
+        ParameterType: String
+        Description:
+          Fn::Sub: Configuration parameter for ${ApplicationName} ${Environment}
+Outputs:
+  LambdaRoleArn:
+    Description: Lambda IAM Role ARN
+    Value:
+      Fn::GetAtt:
+      - LambdaRole
+      - Outputs.RoleArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-LambdaRoleArn
+  LambdaRoleName:
+    Description: Lambda IAM Role Name
+    Value:
+      Fn::GetAtt:
+      - LambdaRole
+      - Outputs.RoleName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-LambdaRoleName
+  LambdaPolicyArn:
+    Description: Lambda IAM Policy ARN
+    Value:
+      Fn::GetAtt:
+      - LambdaPolicy
+      - Outputs.PolicyArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-LambdaPolicyArn
+  SSMParameterName:
+    Description: SSM Parameter Name
+    Value:
+      Fn::GetAtt:
+      - SSMParameter
+      - Outputs.ParameterName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-SSMParameterName
+  SSMParameterArn:
+    Description: SSM Parameter ARN
+    Value:
+      Fn::GetAtt:
+      - SSMParameter
+      - Outputs.ParameterArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-SSMParameterArn

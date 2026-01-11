@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Reusable SSM Parameter Store module'
+
+Parameters:
+  ParameterName:
+    Type: String
+    Description: Name of the SSM parameter (must start with /)
+  
+  ParameterValue:
+    Type: String
+    Description: Value of the SSM parameter
+    NoEcho: true
+  
+  ParameterType:
+    Type: String
+    Default: String
+    Description: Type of the SSM parameter
+    AllowedValues:
+      - String
+      - StringList
+      - SecureString
+  
+  Description:
+    Type: String
+    Description: Description of the parameter
+    Default: ''
+  
+  AllowedPattern:
+    Type: String
+    Description: Regular expression to validate parameter value
+    Default: ''
+
+Conditions:
+  HasDescription: !Not [!Equals [!Ref Description, '']]
+  HasAllowedPattern: !Not [!Equals [!Ref AllowedPattern, '']]
+
+Resources:
+  SSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Ref ParameterName
+      Type: !Ref ParameterType
+      Value: !Ref ParameterValue
+
+Outputs:
+  ParameterName:
+    Description: SSM Parameter Name
+    Value: !Ref SSMParameter
+    Export:
+      Name: !Sub '${AWS::StackName}-ParameterName'
+  
+  ParameterArn:
+    Description: SSM Parameter ARN
+    Value: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ParameterArn'
+  
+  ParameterType:
+    Description: SSM Parameter Type
+    Value: !Ref ParameterType
+    Export:
+      Name: !Sub '${AWS::StackName}-ParameterType'

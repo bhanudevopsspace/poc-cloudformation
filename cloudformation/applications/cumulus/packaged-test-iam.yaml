@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Test stack - IAM Role and Policy only
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+    Default: dev
+  ApplicationName:
+    Type: String
+    Description: Name of the application
+    Default: cumulus
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda code
+    Default: cfn-artifacts-us-west-1
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key for Lambda code zip file
+    Default: lambda-code.zip
+Resources:
+  LambdaRole:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/test-iam/9d93b1f83d3598e12fbcec73ae76c89b.template
+      Parameters:
+        RoleName:
+          Fn::Sub: ${ApplicationName}-${Environment}-lambda-role
+        ServicePrincipal: lambda.amazonaws.com
+        ManagedPolicyArns: arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  LambdaPolicy:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/test-iam/330bcd84a2616392288cabdb714cb01c.template
+      Parameters:
+        PolicyName:
+          Fn::Sub: ${ApplicationName}-${Environment}-lambda-policy
+        PolicyDocument:
+          Fn::Sub: "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n\
+            \      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"ssm:GetParameter\"\
+            ,\n        \"ssm:GetParameters\"\n      ],\n      \"Resource\": \"arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ApplicationName}/${Environment}/*\"\
+            \n    },\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n \
+            \       \"s3:ListBucket\",\n        \"s3:GetObject\",\n        \"s3:PutObject\"\
+            \n      ],\n      \"Resource\": [\n        \"arn:aws:s3:::*\"\n      ]\n\
+            \    },\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n  \
+            \      \"kms:Decrypt\",\n        \"kms:GenerateDataKey\"\n      ],\n \
+            \     \"Resource\": \"*\"\n    }\n  ]\n}\n"
+        RoleName:
+          Fn::GetAtt:
+          - LambdaRole
+          - Outputs.RoleName
+  LambdaFunction:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - LambdaRole
+    - LambdaPolicy
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/test-iam/a1604b03fda9958d641ef718154f7a0d.template
+      Parameters:
+        FunctionName:
+          Fn::Sub: ${ApplicationName}-${Environment}-function
+        Runtime: python3.11
+        Handler: index.handler
+        CodeS3Bucket:
+          Ref: LambdaCodeBucket
+        CodeS3Key:
+          Ref: LambdaCodeKey
+        RoleArn:
+          Fn::GetAtt:
+          - LambdaRole
+          - Outputs.RoleArn
+        MemorySize: 256
+        Timeout: 60
+        Environment:
+          Ref: Environment
+  ApiGateway:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LambdaFunction
+    Properties:
+      TemplateURL: https://s3.us-west-1.amazonaws.com/cfn-artifacts-us-west-1/test-iam/8de436a195b01cb7f0143efe03f590e0.template
+      Parameters:
+        ApiName:
+          Fn::Sub: ${ApplicationName}-${Environment}-api
+        StageName:
+          Ref: Environment
+        LambdaFunctionArn:
+          Fn::GetAtt:
+          - LambdaFunction
+          - Outputs.FunctionArn
+        ThrottlingBurstLimit: 5000
+        ThrottlingRateLimit: 10000
+Outputs:
+  LambdaRoleArn:
+    Description: Lambda IAM Role ARN
+    Value:
+      Fn::GetAtt:
+      - LambdaRole
+      - Outputs.RoleArn
+  LambdaRoleName:
+    Description: Lambda IAM Role Name
+    Value:
+      Fn::GetAtt:
+      - LambdaRole
+      - Outputs.RoleName
+  LambdaPolicyArn:
+    Description: Lambda IAM Policy ARN
+    Value:
+      Fn::GetAtt:
+      - LambdaPolicy
+      - Outputs.PolicyArn
+  ApiUrl:
+    Description: API Gateway URL
+    Value:
+      Fn::GetAtt:
+      - ApiGateway
+      - Outputs.ApiUrl
+  LambdaFunctionArn:
+    Description: Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - LambdaFunction
+      - Outputs.FunctionArn

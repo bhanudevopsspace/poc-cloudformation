@@ -1,189 +1,211 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Root stack for cumulus - orchestrates function-based layers (VPC, Lambda, S3, EC2)'
+Description: 'Root stack for cumulus - orchestrates common layer and functional group layers'
 
 Parameters:
-  Env:
+  Environment:
     Type: String
-    Description: Deployment environment (e.g., dev, staging, prod)
+    Description: Environment name
+    AllowedValues:
+      - dev
+      - staging
+      - prod
   
-  VpcCidr:
+  ApplicationName:
     Type: String
-    Default: 10.0.0.0/16
-    Description: CIDR block for VPC
+    Description: Name of the application
+    Default: cumulus
   
-  PublicSubnetCidr:
+  # Common Layer Parameters (IAM + SSM)
+  SSMParameterValue:
     Type: String
-    Default: 10.0.1.0/24
-    Description: CIDR block for public subnet
+    Description: Value to store in SSM Parameter
+    NoEcho: true
+    Default: 'default-config-value'
   
-  PrivateSubnetCidr:
+  # Functional Group Parameters (Lambda)
+  LambdaCodeBucket:
     Type: String
-    Default: 10.0.2.0/24
-    Description: CIDR block for private subnet
+    Description: S3 bucket containing Lambda code
   
-  KeyName:
+  LambdaCodeKey:
     Type: String
-    Default: ""
-    Description: EC2 Key Pair name (optional)
-  
-  DeployVpcLayer:
-    Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: Deploy VPC layer
-  
-  DeployS3Layer:
-    Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: Deploy S3 layer
-  
-  DeployLambdaLayer:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Deploy Lambda layer
-  
-  DeployEc2Layer:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Deploy EC2 layer
-
-Conditions:
-  ShouldDeployVpc: !Equals [ !Ref DeployVpcLayer, "true" ]
-  ShouldDeployS3: !Equals [ !Ref DeployS3Layer, "true" ]
-  ShouldDeployLambda: !Equals [ !Ref DeployLambdaLayer, "true" ]
-  ShouldDeployEc2: !Equals [ !Ref DeployEc2Layer, "true" ]
+    Description: S3 key for Lambda code zip file
+    Default: 'lambda-code.zip'
 
 Resources:
   # ========================================
-  # VPC LAYER (Foundation - Deploy First)
+  # COMMON LAYER (Deploy First - IAM + SSM)
   # ========================================
-  VpcLayer:
+  CommonLayer:
     Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployVpc
     Properties:
-      TemplateURL: ../../layers/vpc-layer.yaml
+      TemplateURL: ../../layers/common-layer.yaml
       Parameters:
-        Env: !Ref Env
-        VpcCidr: !Ref VpcCidr
-        PublicSubnetCidr: !Ref PublicSubnetCidr
-        PrivateSubnetCidr: !Ref PrivateSubnetCidr
-        EnableNatGateway: "true"
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+        SSMParameterValue: !Ref SSMParameterValue
       Tags:
         - Key: Layer
-          Value: VPC
+          Value: Common
         - Key: Environment
-          Value: !Ref Env
+          Value: !Ref Environment
 
   # ========================================
-  # S3 LAYER
+  # FUNCTIONAL GROUP 1 (Deploy Second - API Gateway + Lambda + S3 + KMS)
   # ========================================
-  S3Layer:
+  FunctionalGroup1:
     Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployS3
+    DependsOn: CommonLayer
     Properties:
-      TemplateURL: ../../layers/s3-layer.yaml
+      TemplateURL: ../../layers/functional-group1.yaml
       Parameters:
-        Env: !Ref Env
-        EnableVersioning: "true"
-        EnableEncryption: "true"
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+        LambdaCodeBucket: !Ref LambdaCodeBucket
+        LambdaCodeKey: !Ref LambdaCodeKey
+        LambdaRoleArn: !GetAtt CommonLayer.Outputs.LambdaRoleArn
+        SSMParameterName: !GetAtt CommonLayer.Outputs.SSMParameterName
       Tags:
         - Key: Layer
-          Value: S3
+          Value: FunctionalGroup1
         - Key: Environment
-          Value: !Ref Env
+          Value: !Ref Environment
 
   # ========================================
-  # LAMBDA LAYER
+  # FUNCTIONAL GROUP 2 (Deploy Third - API Gateway + Lambda + S3 + KMS)
   # ========================================
-  LambdaLayer:
+  FunctionalGroup2:
     Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployLambda
+    DependsOn: CommonLayer
     Properties:
-      TemplateURL: ../../layers/lambda-layer.yaml
+      TemplateURL: ../../layers/functional-group2.yaml
       Parameters:
-        Env: !Ref Env
-        LambdaCodeBucket: ""
-        LambdaCodeKey: "lambda-function.zip"
+        Environment: !Ref Environment
+        ApplicationName: !Ref ApplicationName
+        LambdaCodeBucket: !Ref LambdaCodeBucket
+        LambdaCodeKey: !Ref LambdaCodeKey
+        LambdaRoleArn: !GetAtt CommonLayer.Outputs.LambdaRoleArn
+        SSMParameterName: !GetAtt CommonLayer.Outputs.SSMParameterName
       Tags:
         - Key: Layer
-          Value: Lambda
+          Value: FunctionalGroup2
         - Key: Environment
-          Value: !Ref Env
-
-  # ========================================
-  # EC2 LAYER (Depends on VPC)
-  # ========================================
-  Ec2Layer:
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployEc2
-    DependsOn: VpcLayer
-    Properties:
-      TemplateURL: ../../layers/ec2-layer.yaml
-      Parameters:
-        Env: !Ref Env
-        VpcId: !If [ ShouldDeployVpc, !GetAtt VpcLayer.Outputs.VpcId, "" ]
-        SubnetId: !If [ ShouldDeployVpc, !GetAtt VpcLayer.Outputs.PrivateSubnetId, "" ]
-        KeyName: !Ref KeyName
-        InstanceType: "t3.micro"
-      Tags:
-        - Key: Layer
-          Value: EC2
-        - Key: Environment
-          Value: !Ref Env
+          Value: !Ref Environment
 
 Outputs:
-  # VPC Outputs
-  VpcId:
-    Condition: ShouldDeployVpc
-    Description: VPC ID
-    Value: !GetAtt VpcLayer.Outputs.VpcId
-    Export:
-      Name: !Sub '${AWS::StackName}-VpcId'
-  
-  PublicSubnetId:
-    Condition: ShouldDeployVpc
-    Description: Public subnet ID
-    Value: !GetAtt VpcLayer.Outputs.PublicSubnetId
-    Export:
-      Name: !Sub '${AWS::StackName}-PublicSubnetId'
-  
-  PrivateSubnetId:
-    Condition: ShouldDeployVpc
-    Description: Private subnet ID
-    Value: !GetAtt VpcLayer.Outputs.PrivateSubnetId
-    Export:
-      Name: !Sub '${AWS::StackName}-PrivateSubnetId'
-  
-  # S3 Outputs
-  DataBucketName:
-    Condition: ShouldDeployS3
-    Description: S3 data bucket name
-    Value: !GetAtt S3Layer.Outputs.DataBucketName
-    Export:
-      Name: !Sub '${AWS::StackName}-DataBucketName'
-  
-  S3RoleArn:
-    Condition: ShouldDeployS3
-    Description: S3 access role ARN
-    Value: !GetAtt S3Layer.Outputs.S3RoleArn
-    Export:
-      Name: !Sub '${AWS::StackName}-S3RoleArn'
-  
-  # Lambda Outputs
+  # Common Layer Outputs (IAM + SSM)
   LambdaRoleArn:
-    Condition: ShouldDeployLambda
-    Description: Lambda execution role ARN
-    Value: !GetAtt LambdaLayer.Outputs.LambdaRoleArn
+    Description: Lambda IAM Role ARN
+    Value: !GetAtt CommonLayer.Outputs.LambdaRoleArn
     Export:
       Name: !Sub '${AWS::StackName}-LambdaRoleArn'
   
-  # EC2 Outputs
-  EC2RoleArn:
-    Condition: ShouldDeployEc2
-    Description: EC2 instance role ARN
-    Value: !GetAtt Ec2Layer.Outputs.EC2RoleArn
+  LambdaRoleName:
+    Description: Lambda IAM Role Name
+    Value: !GetAtt CommonLayer.Outputs.LambdaRoleName
     Export:
-      Name: !Sub '${AWS::StackName}-EC2RoleArn'
+      Name: !Sub '${AWS::StackName}-LambdaRoleName'
+  
+  SSMParameterName:
+    Description: SSM Parameter Name
+    Value: !GetAtt CommonLayer.Outputs.SSMParameterName
+    Export:
+      Name: !Sub '${AWS::StackName}-SSMParameterName'
+  
+  # Functional Group 1 Outputs
+  FunctionalGroup1ApiUrl:
+    Description: Functional Group 1 API Gateway URL
+    Value: !GetAtt FunctionalGroup1.Outputs.ApiUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-ApiUrl'
+  
+  FunctionalGroup1ApiId:
+    Description: Functional Group 1 API Gateway ID
+    Value: !GetAtt FunctionalGroup1.Outputs.ApiId
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-ApiId'
+  
+  FunctionalGroup1LambdaFunctionArn:
+    Description: Functional Group 1 Lambda Function ARN
+    Value: !GetAtt FunctionalGroup1.Outputs.LambdaFunctionArn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-LambdaFunctionArn'
+  
+  FunctionalGroup1LambdaFunctionName:
+    Description: Functional Group 1 Lambda Function Name
+    Value: !GetAtt FunctionalGroup1.Outputs.LambdaFunctionName
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-LambdaFunctionName'
+  
+  FunctionalGroup1S3BucketName:
+    Description: Functional Group 1 S3 Bucket Name
+    Value: !GetAtt FunctionalGroup1.Outputs.S3BucketName
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-S3BucketName'
+  
+  FunctionalGroup1S3BucketArn:
+    Description: Functional Group 1 S3 Bucket ARN
+    Value: !GetAtt FunctionalGroup1.Outputs.S3BucketArn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-S3BucketArn'
+  
+  FunctionalGroup1KMSKeyId:
+    Description: Functional Group 1 KMS Key ID
+    Value: !GetAtt FunctionalGroup1.Outputs.KMSKeyId
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-KMSKeyId'
+  
+  FunctionalGroup1KMSKeyArn:
+    Description: Functional Group 1 KMS Key ARN
+    Value: !GetAtt FunctionalGroup1.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup1-KMSKeyArn'
+  
+  # Functional Group 2 Outputs
+  FunctionalGroup2ApiUrl:
+    Description: Functional Group 2 API Gateway URL
+    Value: !GetAtt FunctionalGroup2.Outputs.ApiUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-ApiUrl'
+  
+  FunctionalGroup2ApiId:
+    Description: Functional Group 2 API Gateway ID
+    Value: !GetAtt FunctionalGroup2.Outputs.ApiId
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-ApiId'
+  
+  FunctionalGroup2LambdaFunctionArn:
+    Description: Functional Group 2 Lambda Function ARN
+    Value: !GetAtt FunctionalGroup2.Outputs.LambdaFunctionArn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-LambdaFunctionArn'
+  
+  FunctionalGroup2LambdaFunctionName:
+    Description: Functional Group 2 Lambda Function Name
+    Value: !GetAtt FunctionalGroup2.Outputs.LambdaFunctionName
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-LambdaFunctionName'
+  
+  FunctionalGroup2S3BucketName:
+    Description: Functional Group 2 S3 Bucket Name
+    Value: !GetAtt FunctionalGroup2.Outputs.S3BucketName
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-S3BucketName'
+  
+  FunctionalGroup2S3BucketArn:
+    Description: Functional Group 2 S3 Bucket ARN
+    Value: !GetAtt FunctionalGroup2.Outputs.S3BucketArn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-S3BucketArn'
+  
+  FunctionalGroup2KMSKeyId:
+    Description: Functional Group 2 KMS Key ID
+    Value: !GetAtt FunctionalGroup2.Outputs.KMSKeyId
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-KMSKeyId'
+  
+  FunctionalGroup2KMSKeyArn:
+    Description: Functional Group 2 KMS Key ARN
+    Value: !GetAtt FunctionalGroup2.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionalGroup2-KMSKeyArn'

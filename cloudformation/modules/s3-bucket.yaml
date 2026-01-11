@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Reusable S3 bucket module with KMS encryption'
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket (leave empty for auto-generated name)
+    Default: ''
+  
+  KmsKeyId:
+    Type: String
+    Description: KMS Key ID for bucket encryption (optional)
+    Default: ''
+  
+  VersioningEnabled:
+    Type: String
+    Default: 'Enabled'
+    Description: Enable versioning on the bucket
+    AllowedValues:
+      - Enabled
+      - Suspended
+  
+  PublicAccessBlock:
+    Type: String
+    Default: 'true'
+    Description: Block all public access
+    AllowedValues:
+      - 'true'
+      - 'false'
+  
+  LifecycleExpirationDays:
+    Type: Number
+    Default: 90
+    Description: Days until objects expire (0 to disable)
+    MinValue: 0
+
+Conditions:
+  HasBucketName: !Not [!Equals [!Ref BucketName, '']]
+  HasKmsKey: !Not [!Equals [!Ref KmsKeyId, '']]
+  HasLifecycleExpiration: !Not [!Equals [!Ref LifecycleExpirationDays, 0]]
+  BlockPublicAccess: !Equals [!Ref PublicAccessBlock, 'true']
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If [HasBucketName, !Ref BucketName, !Ref AWS::NoValue]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: !If [HasKmsKey, 'aws:kms', 'AES256']
+              KMSMasterKeyID: !If [HasKmsKey, !Ref KmsKeyId, !Ref AWS::NoValue]
+            BucketKeyEnabled: !If [HasKmsKey, true, !Ref AWS::NoValue]
+      VersioningConfiguration:
+        Status: !Ref VersioningEnabled
+      PublicAccessBlockConfiguration: !If
+        - BlockPublicAccess
+        - BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        - !Ref AWS::NoValue
+      LifecycleConfiguration: !If
+        - HasLifecycleExpiration
+        - Rules:
+            - Id: ExpireOldObjects
+              Status: Enabled
+              ExpirationInDays: !Ref LifecycleExpirationDays
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !If [HasBucketName, !Ref BucketName, !Sub '${AWS::StackName}-bucket']
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: HasKmsKey
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:PutObject'
+            Resource: !Sub 'arn:aws:s3:::${S3Bucket}/*'
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': 'aws:kms'
+
+Outputs:
+  BucketName:
+    Description: S3 Bucket Name
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+  
+  BucketArn:
+    Description: S3 Bucket ARN
+    Value: !GetAtt S3Bucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketArn'
+  
+  BucketDomainName:
+    Description: S3 Bucket Domain Name
+    Value: !GetAtt S3Bucket.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketDomainName'

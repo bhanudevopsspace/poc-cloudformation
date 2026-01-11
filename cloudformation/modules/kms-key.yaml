@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Reusable KMS Key module'
+
+Parameters:
+  KeyAlias:
+    Type: String
+    Description: Alias for the KMS key (without 'alias/' prefix)
+  
+  Description:
+    Type: String
+    Description: Description of the KMS key
+    Default: 'KMS key for encryption'
+  
+  EnableKeyRotation:
+    Type: String
+    Default: 'true'
+    Description: Enable automatic key rotation
+    AllowedValues:
+      - 'true'
+      - 'false'
+  
+  PrincipalArns:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: IAM principal ARNs that can use this key (comma separated, leave empty for account root)
+
+Conditions:
+  HasPrincipals: !Not [!Equals [!Join ['', !Ref PrincipalArns], '']]
+  EnableRotation: !Equals [!Ref EnableKeyRotation, 'true']
+
+Resources:
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Ref Description
+      EnableKeyRotation: !If [EnableRotation, true, false]
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow services to use the key
+            Effect: Allow
+            Principal:
+              Service:
+                - s3.amazonaws.com
+                - lambda.amazonaws.com
+                - logs.amazonaws.com
+                - ssm.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey'
+              - 'kms:CreateGrant'
+            Resource: '*'
+          - !If
+            - HasPrincipals
+            - Sid: Allow specific principals to use the key
+              Effect: Allow
+              Principal:
+                AWS: !Ref PrincipalArns
+              Action:
+                - 'kms:Decrypt'
+                - 'kms:DescribeKey'
+                - 'kms:Encrypt'
+                - 'kms:GenerateDataKey*'
+                - 'kms:ReEncrypt*'
+              Resource: '*'
+            - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Ref KeyAlias
+
+  KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${KeyAlias}'
+      TargetKeyId: !Ref KMSKey
+
+Outputs:
+  KeyId:
+    Description: KMS Key ID
+    Value: !Ref KMSKey
+    Export:
+      Name: !Sub '${AWS::StackName}-KeyId'
+  
+  KeyArn:
+    Description: KMS Key ARN
+    Value: !GetAtt KMSKey.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-KeyArn'
+  
+  KeyAlias:
+    Description: KMS Key Alias
+    Value: !Ref KMSKeyAlias
+    Export:
+      Name: !Sub '${AWS::StackName}-KeyAlias'

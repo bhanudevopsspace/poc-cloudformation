@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Functional Group 1 - API Gateway and Lambda Function'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+  
+  ApplicationName:
+    Type: String
+    Description: Name of the application
+  
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda code
+  
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key for Lambda code zip file
+  
+  LambdaRoleArn:
+    Type: String
+    Description: IAM Role ARN for Lambda from Common Layer
+  
+  SSMParameterName:
+    Type: String
+    Description: SSM Parameter Name from Common Layer
+
+Resources:
+  # KMS Key for S3 Encryption
+  KMSKey:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ../modules/kms-key.yaml
+      Parameters:
+        KeyAlias: !Sub '${ApplicationName}-${Environment}-s3-key'
+        Description: !Sub 'KMS key for ${ApplicationName} ${Environment} S3 bucket encryption'
+        EnableKeyRotation: 'true'
+        PrincipalArns: !Ref LambdaRoleArn
+
+  # S3 Bucket with KMS Encryption
+  S3Bucket:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: KMSKey
+    Properties:
+      TemplateURL: ../modules/s3-bucket.yaml
+      Parameters:
+        BucketName: !Sub '${ApplicationName}-${Environment}-data-bucket'
+        KmsKeyId: !GetAtt KMSKey.Outputs.KeyId
+        VersioningEnabled: 'Enabled'
+        PublicAccessBlock: 'true'
+        LifecycleExpirationDays: 90
+
+  # Lambda Function
+  LambdaFunction:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - S3Bucket
+    Properties:
+      TemplateURL: ../modules/lambda.yaml
+      Parameters:
+        FunctionName: !Sub '${ApplicationName}-${Environment}-function'
+        Runtime: python3.11
+        Handler: index.handler
+        CodeS3Bucket: !Ref LambdaCodeBucket
+        CodeS3Key: !Ref LambdaCodeKey
+        RoleArn: !Ref LambdaRoleArn
+        MemorySize: 256
+        Timeout: 60
+        Environment: !Ref Environment
+
+  # API Gateway
+  ApiGateway:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LambdaFunction
+    Properties:
+      TemplateURL: ../modules/api-gateway.yaml
+      Parameters:
+        ApiName: !Sub '${ApplicationName}-${Environment}-api'
+        StageName: !Ref Environment
+        LambdaFunctionArn: !GetAtt LambdaFunction.Outputs.FunctionArn
+        ThrottlingBurstLimit: 5000
+        ThrottlingRateLimit: 10000
+
+Outputs:
+  KMSKeyId:
+    Description: KMS Key ID
+    Value: !GetAtt KMSKey.Outputs.KeyId
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyId'
+  
+  KMSKeyArn:
+    Description: KMS Key ARN
+    Value: !GetAtt KMSKey.Outputs.KeyArn
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyArn'
+  
+  S3BucketName:
+    Description: S3 Bucket Name
+    Value: !GetAtt S3Bucket.Outputs.BucketName
+    Export:
+      Name: !Sub '${AWS::StackName}-S3BucketName'
+  
+  S3BucketArn:
+    Description: S3 Bucket ARN
+    Value: !GetAtt S3Bucket.Outputs.BucketArn
+    Export:
+      Name: !Sub '${AWS::StackName}-S3BucketArn'
+  
+  ApiUrl:
+    Description: API Gateway URL
+    Value: !GetAtt ApiGateway.Outputs.ApiUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+  
+  ApiId:
+    Description: API Gateway ID
+    Value: !GetAtt ApiGateway.Outputs.ApiId
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiId'
+  
+  LambdaFunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt LambdaFunction.Outputs.FunctionArn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+  
+  LambdaFunctionName:
+    Description: Lambda Function Name
+    Value: !GetAtt LambdaFunction.Outputs.FunctionName
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName'

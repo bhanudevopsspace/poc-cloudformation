@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Reusable Lambda function module'
+
+Parameters:
+  FunctionName:
+    Type: String
+    Description: Name of the Lambda function
+  
+  Runtime:
+    Type: String
+    Default: python3.11
+    Description: Lambda runtime environment
+    AllowedValues:
+      - python3.11
+      - python3.10
+      - python3.9
+      - nodejs18.x
+      - nodejs20.x
+  
+  Handler:
+    Type: String
+    Default: index.handler
+    Description: Lambda function handler
+  
+  CodeS3Bucket:
+    Type: String
+    Description: S3 bucket containing the Lambda code
+  
+  CodeS3Key:
+    Type: String
+    Description: S3 key for the Lambda code zip file
+  
+  RoleArn:
+    Type: String
+    Description: IAM Role ARN for the Lambda function
+  
+  MemorySize:
+    Type: Number
+    Default: 128
+    Description: Memory size in MB
+    MinValue: 128
+    MaxValue: 10240
+  
+  Timeout:
+    Type: Number
+    Default: 30
+    Description: Function timeout in seconds
+    MinValue: 1
+    MaxValue: 900
+  
+  Environment:
+    Type: String
+    Default: ""
+    Description: Environment variables as JSON string (e.g., '{"KEY1":"value1"}')
+
+Conditions:
+  HasEnvironment: !Not [!Equals [!Ref Environment, ""]]
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: !Ref Handler
+      Role: !Ref RoleArn
+      Code:
+        S3Bucket: !Ref CodeS3Bucket
+        S3Key: !Ref CodeS3Key
+      MemorySize: !Ref MemorySize
+      Timeout: !Ref Timeout
+      Environment: !If
+        - HasEnvironment
+        - Variables:
+            ENVIRONMENT: !Ref Environment
+        - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Ref FunctionName
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}'
+      RetentionInDays: 7
+
+Outputs:
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt LambdaFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionArn'
+  
+  FunctionName:
+    Description: Lambda Function Name
+    Value: !Ref LambdaFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionName'

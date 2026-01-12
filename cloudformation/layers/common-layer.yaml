@@ -19,6 +19,10 @@ Parameters:
     Description: Value to store in SSM Parameter
     NoEcho: true
 
+Conditions:
+  # Condition to check if environment is dev
+  IsDevEnvironment: !Equals [!Ref Environment, 'dev']
+
 Resources:
   # IAM Role for Lambda
   LambdaRole:
@@ -30,7 +34,7 @@ Resources:
         ServicePrincipal: lambda.amazonaws.com
         ManagedPolicyArns: 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
 
-  # IAM Policy for Lambda
+  # IAM Policy 1 for Lambda (Base policy - always created)
   LambdaPolicy:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -72,6 +76,49 @@ Resources:
           }
         RoleName: !GetAtt LambdaRole.Outputs.RoleName
 
+  # IAM Policy 2 for Lambda (Additional policy - only for dev)
+  LambdaPolicy2:
+    Type: AWS::CloudFormation::Stack
+    Condition: IsDevEnvironment
+    Properties:
+      TemplateURL: ../modules/iam-policy.yaml
+      Parameters:
+        PolicyName: !Sub '${ApplicationName}-${Environment}-lambda-policy-2'
+        PolicyDocument: !Sub |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "dynamodb:GetItem",
+                  "dynamodb:PutItem",
+                  "dynamodb:UpdateItem",
+                  "dynamodb:Query",
+                  "dynamodb:Scan"
+                ],
+                "Resource": "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sqs:SendMessage",
+                  "sqs:ReceiveMessage",
+                  "sqs:DeleteMessage"
+                ],
+                "Resource": "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "sns:Publish"
+                ],
+                "Resource": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:*"
+              }
+            ]
+          }
+        RoleName: !GetAtt LambdaRole.Outputs.RoleName
+
   # SSM Parameter
   SSMParameter:
     Type: AWS::CloudFormation::Stack
@@ -101,6 +148,12 @@ Outputs:
     Value: !GetAtt LambdaPolicy.Outputs.PolicyArn
     Export:
       Name: !Sub '${AWS::StackName}-LambdaPolicyArn'
+  
+  LambdaPolicy2Arn:
+    Description: Lambda IAM Policy 2 ARN (only in dev)
+    Value: !If [IsDevEnvironment, !GetAtt LambdaPolicy2.Outputs.PolicyArn, 'N/A']
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaPolicy2Arn'
   
   SSMParameterName:
     Description: SSM Parameter Name

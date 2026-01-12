@@ -1,79 +1,188 @@
-name: Deploy CloudFormation
+name: Deploy CloudFormation Stack
 
 on:
   push:
     branches:
       - main
+      - develop
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       environment:
-        description: "Environment to deploy (dev or staging)"
+        description: 'Environment to deploy'
         required: true
-        default: dev
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
 
 env:
-  APP_NAME: app1
+  AWS_REGION_DEV: us-west-1
+  AWS_REGION_STAGING: us-west-2
+  AWS_REGION_PROD: us-east-1
 
 jobs:
-  deploy:
+  prepare:
+    name: Prepare Deployment
     runs-on: ubuntu-latest
-
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      region: ${{ steps.set-env.outputs.region }}
+      s3-bucket: ${{ steps.set-env.outputs.s3-bucket }}
+    
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="prod"
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+          
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          
+          # Set region based on environment
+          if [ "$ENV" == "dev" ]; then
+            echo "region=${{ env.AWS_REGION_DEV }}" >> $GITHUB_OUTPUT
+            echo "s3-bucket=cfn-artifacts-us-west-1" >> $GITHUB_OUTPUT
+          elif [ "$ENV" == "staging" ]; then
+            echo "region=${{ env.AWS_REGION_STAGING }}" >> $GITHUB_OUTPUT
+            echo "s3-bucket=cumulus-cfn-artifacts-us-west-2" >> $GITHUB_OUTPUT
+          else
+            echo "region=${{ env.AWS_REGION_PROD }}" >> $GITHUB_OUTPUT
+            echo "s3-bucket=cfn-artifacts-us-east-1" >> $GITHUB_OUTPUT
+          fi
 
-      # 2️⃣ Configure AWS credentials
-      - name: Configure AWS credentials
+  build-lambda:
+    name: Build and Upload Lambda Code
+    runs-on: ubuntu-latest
+    needs: prepare
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-west-1 # default, overridden below
-
-      # 3️⃣ Set environment-specific variables
-      - name: Set environment variables
-        id: env
+          aws-region: ${{ needs.prepare.outputs.region }}
+      
+      - name: Package Lambda Function
         run: |
-          if [ "${{ github.event.inputs.environment }}" = "staging" ]; then
-            echo "ENV=staging" >> $GITHUB_ENV
-            echo "AWS_REGION=us-west-2" >> $GITHUB_ENV
-            echo "ARTIFACT_BUCKET=cfn-artifacts-us-west-2" >> $GITHUB_ENV
+          cd lambda
+          zip -r lambda-code.zip index.py
+          ls -lh lambda-code.zip
+      
+      - name: Upload Lambda to S3
+        run: |
+          aws s3 cp lambda/lambda-code.zip s3://${{ needs.prepare.outputs.s3-bucket }}/lambda-code.zip
+          echo "Lambda code uploaded to s3://${{ needs.prepare.outputs.s3-bucket }}/lambda-code.zip"
+
+  deploy:
+    name: Deploy CloudFormation Stack
+    runs-on: ubuntu-latest
+    needs: [prepare, build-lambda]
+    environment:
+      name: ${{ needs.prepare.outputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ needs.prepare.outputs.region }}
+      
+      - name: Get Common Layer Outputs (if exists)
+        id: common-outputs
+        continue-on-error: true
+        run: |
+          STACK_NAME="cumulus-${{ needs.prepare.outputs.environment }}-common-layer"
+          
+          if aws cloudformation describe-stacks --stack-name $STACK_NAME --region ${{ needs.prepare.outputs.region }} 2>/dev/null; then
+            ROLE_ARN=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region ${{ needs.prepare.outputs.region }} --query 'Stacks[0].Outputs[?OutputKey==`LambdaRoleArn`].OutputValue' --output text)
+            SSM_PARAM=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region ${{ needs.prepare.outputs.region }} --query 'Stacks[0].Outputs[?OutputKey==`SSMParameterName`].OutputValue' --output text)
+            
+            echo "lambda-role-arn=$ROLE_ARN" >> $GITHUB_OUTPUT
+            echo "ssm-parameter=$SSM_PARAM" >> $GITHUB_OUTPUT
+            echo "stack-exists=true" >> $GITHUB_OUTPUT
           else
-            echo "ENV=dev" >> $GITHUB_ENV
-            echo "AWS_REGION=us-west-1" >> $GITHUB_ENV
-            echo "ARTIFACT_BUCKET=cfn-artifacts-us-west-1" >> $GITHUB_ENV
+            echo "stack-exists=false" >> $GITHUB_OUTPUT
           fi
-
-      # 4️⃣ Update AWS region for this job
-      - name: Update AWS region
+      
+      - name: Update app.json with outputs
+        if: steps.common-outputs.outputs.stack-exists == 'true'
         run: |
-          echo "AWS_DEFAULT_REGION=${AWS_REGION}" >> $GITHUB_ENV
-
-      # 5️⃣ Ensure artifacts bucket exists
-      - name: Ensure S3 artifacts bucket exists
+          cd cloudformation/applications/cumulus/${{ needs.prepare.outputs.environment }}
+          
+          # Update app.json with Lambda role and SSM parameter
+          jq '.LambdaRoleArn = "${{ steps.common-outputs.outputs.lambda-role-arn }}" | .SSMParameterName = "${{ steps.common-outputs.outputs.ssm-parameter }}"' app.json > app.json.tmp
+          mv app.json.tmp app.json
+          
+          cat app.json
+      
+      - name: Package CloudFormation Template
         run: |
-          aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null || \
-          aws s3api create-bucket \
-            --bucket "$ARTIFACT_BUCKET" \
-            --region "$AWS_REGION" \
-            --create-bucket-configuration LocationConstraint="$AWS_REGION"
-
-      # 6️⃣ Package CloudFormation templates
-      - name: Package CloudFormation
-        run: |
+          cd cloudformation/applications/cumulus
+          
           aws cloudformation package \
-            --region "$AWS_REGION" \
-            --template-file cloudformation/stacks/app.yaml \
-            --s3-bucket "$ARTIFACT_BUCKET" \
-            --output-template-file packaged.yaml
-
-      # 7️⃣ Deploy CloudFormation stack
-      - name: Deploy CloudFormation
+            --region ${{ needs.prepare.outputs.region }} \
+            --template-file root.yaml \
+            --s3-bucket ${{ needs.prepare.outputs.s3-bucket }} \
+            --output-template-file packaged-${{ needs.prepare.outputs.environment }}.yaml
+      
+      - name: Deploy CloudFormation Stack
         run: |
+          cd cloudformation/applications/cumulus
+          
+          # Read parameters from app.json
+          PARAMS=$(jq -r 'to_entries | map("\(.key)=\(.value)") | join(" ")' ${{ needs.prepare.outputs.environment }}/app.json)
+          
           aws cloudformation deploy \
-            --region "$AWS_REGION" \
-            --template-file packaged.yaml \
-            --stack-name "${APP_NAME}-${ENV}" \
-            --parameter-overrides $(jq -r 'to_entries|map("\(.key)=\(.value)")|.[]' config/environments/application1/${ENV}/app.json) \
-            --capabilities CAPABILITY_NAMED_IAM
+            --region ${{ needs.prepare.outputs.region }} \
+            --template-file packaged-${{ needs.prepare.outputs.environment }}.yaml \
+            --stack-name cumulus-${{ needs.prepare.outputs.environment }}-all-resources \
+            --parameter-overrides $PARAMS \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+      
+      - name: Get Stack Outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --region ${{ needs.prepare.outputs.region }} \
+            --stack-name cumulus-${{ needs.prepare.outputs.environment }}-all-resources \
+            --query 'Stacks[0].Outputs' \
+            --output table
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy]
+    if: always()
+    
+    steps:
+      - name: Deployment Success
+        if: needs.deploy.result == 'success'
+        run: |
+          echo "✅ Deployment to ${{ needs.prepare.outputs.environment }} completed successfully!"
+          echo "Region: ${{ needs.prepare.outputs.region }}"
+          echo "Stack: cumulus-${{ needs.prepare.outputs.environment }}-all-resources"
+      
+      - name: Deployment Failed
+        if: needs.deploy.result != 'success'
+        run: |
+          echo "❌ Deployment to ${{ needs.prepare.outputs.environment }} failed!"
+          exit 1

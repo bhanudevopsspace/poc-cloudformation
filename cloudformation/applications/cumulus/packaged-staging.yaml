@@ -1,64 +1,273 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Root stack for cumulus - orchestrates common layer and functional group
+  layers
 Parameters:
-  Env:
+  Environment:
     Type: String
-Conditions:
-  IsStaging:
-    Fn::Equals:
-    - Ref: Env
+    Description: Environment name
+    AllowedValues:
+    - dev
     - staging
+    - prod
+  ApplicationName:
+    Type: String
+    Description: Name of the application
+    Default: cumulus
+  SSMParameterValue:
+    Type: String
+    Description: Value to store in SSM Parameter
+    NoEcho: true
+    Default: default-config-value
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda code
+  LambdaCodeKey:
+    Type: String
+    Description: S3 key for Lambda code zip file
+    Default: lambda-code.zip
 Resources:
-  IAMPolicy:
+  CommonLayer:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/3a5d9e735a44d78d761fb865d9cc8ca0.template
+      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/c4f897dac4eceaa93ebc422ea2810cef.template
       Parameters:
         Environment:
-          Ref: Env
-        BaseName:
-          Ref: AWS::StackName
-        PolicyBaseName: readonly
-  IAMRole:
+          Ref: Environment
+        ApplicationName:
+          Ref: ApplicationName
+        SSMParameterValue:
+          Ref: SSMParameterValue
+      Tags:
+      - Key: Layer
+        Value: Common
+      - Key: Environment
+        Value:
+          Ref: Environment
+  FunctionalGroup1:
     Type: AWS::CloudFormation::Stack
-    DependsOn: IAMPolicy
+    DependsOn: CommonLayer
     Properties:
-      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/0fc50d3a09795830dc898c166adccee9.template
+      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/0225f0612dfc0d2bbfd1ceea67d25eb3.template
       Parameters:
-        RoleName:
-          Fn::Sub: ${AWS::StackName}-${Env}
-        ReadOnlyPolicyArn:
+        Environment:
+          Ref: Environment
+        ApplicationName:
+          Ref: ApplicationName
+        LambdaCodeBucket:
+          Ref: LambdaCodeBucket
+        LambdaCodeKey:
+          Ref: LambdaCodeKey
+        LambdaRoleArn:
           Fn::GetAtt:
-          - IAMPolicy
-          - Outputs.ReadOnlyPolicyArn
-        GuardrailPolicyArn:
+          - CommonLayer
+          - Outputs.LambdaRoleArn
+        SSMParameterName:
           Fn::GetAtt:
-          - IAMPolicy
-          - Outputs.GuardrailPolicyArn
-  S3ListPolicyAttachment:
-    Type: AWS::IAM::RolePolicyAttachment
-    Condition: IsStaging
+          - CommonLayer
+          - Outputs.SSMParameterName
+      Tags:
+      - Key: Layer
+        Value: FunctionalGroup1
+      - Key: Environment
+        Value:
+          Ref: Environment
+  FunctionalGroup2:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: CommonLayer
     Properties:
-      RoleName:
-        Fn::GetAtt:
-        - IAMRole
-        - Outputs.RoleName
-      ManagedPolicyArn:
-        Fn::GetAtt:
-        - IAMPolicy
-        - Outputs.S3ListPolicyArn
+      TemplateURL: https://s3.us-west-2.amazonaws.com/cumulus-cfn-artifacts-us-west-2/8338cee045a390ec3acd5423674c2864.template
+      Parameters:
+        Environment:
+          Ref: Environment
+        ApplicationName:
+          Ref: ApplicationName
+        LambdaCodeBucket:
+          Ref: LambdaCodeBucket
+        LambdaCodeKey:
+          Ref: LambdaCodeKey
+        LambdaRoleArn:
+          Fn::GetAtt:
+          - CommonLayer
+          - Outputs.LambdaRoleArn
+        SSMParameterName:
+          Fn::GetAtt:
+          - CommonLayer
+          - Outputs.SSMParameterName
+      Tags:
+      - Key: Layer
+        Value: FunctionalGroup2
+      - Key: Environment
+        Value:
+          Ref: Environment
 Outputs:
-  RoleArn:
+  LambdaRoleArn:
+    Description: Lambda IAM Role ARN
     Value:
       Fn::GetAtt:
-      - IAMRole
-      - Outputs.RoleArn
+      - CommonLayer
+      - Outputs.LambdaRoleArn
     Export:
       Name:
-        Fn::Sub: ${AWS::StackName}-RoleArn
-  InstanceProfileArn:
+        Fn::Sub: ${AWS::StackName}-LambdaRoleArn
+  LambdaRoleName:
+    Description: Lambda IAM Role Name
     Value:
       Fn::GetAtt:
-      - IAMRole
-      - Outputs.InstanceProfileArn
+      - CommonLayer
+      - Outputs.LambdaRoleName
     Export:
       Name:
-        Fn::Sub: ${AWS::StackName}-InstanceProfileArn
+        Fn::Sub: ${AWS::StackName}-LambdaRoleName
+  SSMParameterName:
+    Description: SSM Parameter Name
+    Value:
+      Fn::GetAtt:
+      - CommonLayer
+      - Outputs.SSMParameterName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-SSMParameterName
+  FunctionalGroup1ApiUrl:
+    Description: Functional Group 1 API Gateway URL
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.ApiUrl
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-ApiUrl
+  FunctionalGroup1ApiId:
+    Description: Functional Group 1 API Gateway ID
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.ApiId
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-ApiId
+  FunctionalGroup1LambdaFunctionArn:
+    Description: Functional Group 1 Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.LambdaFunctionArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-LambdaFunctionArn
+  FunctionalGroup1LambdaFunctionName:
+    Description: Functional Group 1 Lambda Function Name
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.LambdaFunctionName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-LambdaFunctionName
+  FunctionalGroup1S3BucketName:
+    Description: Functional Group 1 S3 Bucket Name
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.S3BucketName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-S3BucketName
+  FunctionalGroup1S3BucketArn:
+    Description: Functional Group 1 S3 Bucket ARN
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.S3BucketArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-S3BucketArn
+  FunctionalGroup1KMSKeyId:
+    Description: Functional Group 1 KMS Key ID
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.KMSKeyId
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-KMSKeyId
+  FunctionalGroup1KMSKeyArn:
+    Description: Functional Group 1 KMS Key ARN
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup1
+      - Outputs.KMSKeyArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup1-KMSKeyArn
+  FunctionalGroup2ApiUrl:
+    Description: Functional Group 2 API Gateway URL
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.ApiUrl
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-ApiUrl
+  FunctionalGroup2ApiId:
+    Description: Functional Group 2 API Gateway ID
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.ApiId
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-ApiId
+  FunctionalGroup2LambdaFunctionArn:
+    Description: Functional Group 2 Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.LambdaFunctionArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-LambdaFunctionArn
+  FunctionalGroup2LambdaFunctionName:
+    Description: Functional Group 2 Lambda Function Name
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.LambdaFunctionName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-LambdaFunctionName
+  FunctionalGroup2S3BucketName:
+    Description: Functional Group 2 S3 Bucket Name
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.S3BucketName
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-S3BucketName
+  FunctionalGroup2S3BucketArn:
+    Description: Functional Group 2 S3 Bucket ARN
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.S3BucketArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-S3BucketArn
+  FunctionalGroup2KMSKeyId:
+    Description: Functional Group 2 KMS Key ID
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.KMSKeyId
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-KMSKeyId
+  FunctionalGroup2KMSKeyArn:
+    Description: Functional Group 2 KMS Key ARN
+    Value:
+      Fn::GetAtt:
+      - FunctionalGroup2
+      - Outputs.KMSKeyArn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-FunctionalGroup2-KMSKeyArn

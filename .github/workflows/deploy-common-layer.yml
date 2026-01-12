@@ -1,0 +1,171 @@
+name: Deploy Common Layer
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'cloudformation/layers/common-layer.yaml'
+      - 'cloudformation/modules/iam-role.yaml'
+      - 'cloudformation/modules/iam-policy.yaml'
+      - 'cloudformation/modules/ssm-parameter.yaml'
+      - '.github/workflows/deploy-common-layer.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'cloudformation/layers/common-layer.yaml'
+      - 'cloudformation/modules/iam-*.yaml'
+      - 'cloudformation/modules/ssm-parameter.yaml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  AWS_REGION_DEV: us-west-1
+  AWS_REGION_STAGING: us-west-2
+  AWS_REGION_PROD: us-east-1
+
+jobs:
+  prepare:
+    name: Prepare Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      region: ${{ steps.set-env.outputs.region }}
+      s3-bucket: ${{ steps.set-env.outputs.s3-bucket }}
+    
+    steps:
+      - name: Determine Environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            ENV="prod"
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            ENV="staging"
+          else
+            ENV="dev"
+          fi
+          
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          
+          # Set region based on environment
+          if [ "$ENV" == "dev" ]; then
+            echo "region=${{ env.AWS_REGION_DEV }}" >> $GITHUB_OUTPUT
+            echo "s3-bucket=cfn-artifacts-us-west-1" >> $GITHUB_OUTPUT
+          elif [ "$ENV" == "staging" ]; then
+            echo "region=${{ env.AWS_REGION_STAGING }}" >> $GITHUB_OUTPUT
+            echo "s3-bucket=cumulus-cfn-artifacts-us-west-2" >> $GITHUB_OUTPUT
+          else
+            echo "region=${{ env.AWS_REGION_PROD }}" >> $GITHUB_OUTPUT
+            echo "s3-bucket=cfn-artifacts-us-east-1" >> $GITHUB_OUTPUT
+          fi
+
+  deploy-common-layer:
+    name: Deploy Common Layer
+    runs-on: ubuntu-latest
+    needs: prepare
+    environment:
+      name: ${{ needs.prepare.outputs.environment }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ needs.prepare.outputs.region }}
+      
+      - name: Verify AWS Connection
+        run: |
+          echo "Testing AWS connection..."
+          aws sts get-caller-identity
+          echo "Current region: ${{ needs.prepare.outputs.region }}"
+      
+      - name: Package Common Layer Template
+        run: |
+          cd cloudformation/layers
+          
+          aws cloudformation package \
+            --region ${{ needs.prepare.outputs.region }} \
+            --template-file common-layer.yaml \
+            --s3-bucket ${{ needs.prepare.outputs.s3-bucket }} \
+            --output-template-file packaged-common-layer-${{ needs.prepare.outputs.environment }}.yaml
+      
+      - name: Deploy Common Layer Stack
+        run: |
+          cd cloudformation/layers
+          
+          aws cloudformation deploy \
+            --region ${{ needs.prepare.outputs.region }} \
+            --template-file packaged-common-layer-${{ needs.prepare.outputs.environment }}.yaml \
+            --stack-name cumulus-${{ needs.prepare.outputs.environment }}-common-layer \
+            --parameter-overrides \
+              Environment=${{ needs.prepare.outputs.environment }} \
+              ApplicationName=cumulus \
+              SSMParameterValue=${{ needs.prepare.outputs.environment }}-config-value \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+      
+      - name: Get Stack Outputs
+        run: |
+          echo "📋 Common Layer Stack Outputs:"
+          aws cloudformation describe-stacks \
+            --region ${{ needs.prepare.outputs.region }} \
+            --stack-name cumulus-${{ needs.prepare.outputs.environment }}-common-layer \
+            --query 'Stacks[0].Outputs' \
+            --output table
+      
+      - name: Export Outputs for Other Layers
+        id: outputs
+        run: |
+          ROLE_ARN=$(aws cloudformation describe-stacks \
+            --region ${{ needs.prepare.outputs.region }} \
+            --stack-name cumulus-${{ needs.prepare.outputs.environment }}-common-layer \
+            --query 'Stacks[0].Outputs[?OutputKey==`LambdaRoleArn`].OutputValue' \
+            --output text)
+          
+          SSM_PARAM=$(aws cloudformation describe-stacks \
+            --region ${{ needs.prepare.outputs.region }} \
+            --stack-name cumulus-${{ needs.prepare.outputs.environment }}-common-layer \
+            --query 'Stacks[0].Outputs[?OutputKey==`SSMParameterName`].OutputValue' \
+            --output text)
+          
+          echo "lambda-role-arn=$ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "ssm-parameter=$SSM_PARAM" >> $GITHUB_OUTPUT
+          
+          echo "✅ Lambda Role ARN: $ROLE_ARN"
+          echo "✅ SSM Parameter: $SSM_PARAM"
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-common-layer]
+    if: always()
+    
+    steps:
+      - name: Deployment Success
+        if: needs.deploy-common-layer.result == 'success'
+        run: |
+          echo "✅ Common Layer deployment to ${{ needs.prepare.outputs.environment }} completed successfully!"
+          echo "Region: ${{ needs.prepare.outputs.region }}"
+          echo "Stack: cumulus-${{ needs.prepare.outputs.environment }}-common-layer"
+      
+      - name: Deployment Failed
+        if: needs.deploy-common-layer.result != 'success'
+        run: |
+          echo "❌ Common Layer deployment to ${{ needs.prepare.outputs.environment }} failed!"
+          exit 1

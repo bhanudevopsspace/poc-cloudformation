@@ -65,10 +65,26 @@ jobs:
     name: Build and Upload Lambda Code
     runs-on: ubuntu-latest
     needs: prepare
+    environment:
+      name: ${{ needs.prepare.outputs.environment }}
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      - name: Validate AWS Credentials
+        run: |
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "❌ AWS_ACCESS_KEY_ID secret is not set in environment: ${{ needs.prepare.outputs.environment }}"
+            echo "Please add AWS credentials to environment secrets:"
+            echo "Settings → Environments → ${{ needs.prepare.outputs.environment }} → Add secret"
+            exit 1
+          fi
+          if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "❌ AWS_SECRET_ACCESS_KEY secret is not set in environment: ${{ needs.prepare.outputs.environment }}"
+            exit 1
+          fi
+          echo "✅ AWS credentials are configured for environment: ${{ needs.prepare.outputs.environment }}"
       
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -76,6 +92,11 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ needs.prepare.outputs.region }}
+      
+      - name: Verify AWS Connection
+        run: |
+          echo "Testing AWS connection..."
+          aws sts get-caller-identity
       
       - name: Package Lambda Function
         run: |
@@ -105,6 +126,12 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ needs.prepare.outputs.region }}
+      
+      - name: Verify AWS Connection
+        run: |
+          echo "Testing AWS connection..."
+          aws sts get-caller-identity
+          echo "Current region: ${{ needs.prepare.outputs.region }}"
       
       - name: Get Common Layer Outputs (if exists)
         id: common-outputs
